@@ -36,10 +36,10 @@ defmodule TypeSafe.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:req, "~> 0.5"},
-      {:plug, "~> 1.16", only: :test},
+      {:req, "~> 0.7.4"},
+      {:plug, "~> 1.20", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false}
     ]
   end
 
