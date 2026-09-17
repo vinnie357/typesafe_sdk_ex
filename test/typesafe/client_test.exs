@@ -55,8 +55,7 @@ defmodule TypeSafe.ClientTest do
     assert client.default_model == "env-model"
     assert client.log_level == :debug
 
-    stub = StubAdapter.respond(200, ~s({"models":[]}))
-    client = %{client | req: Req.Request.put_private(client.req, :typesafe_stub, stub)}
+    client = StubAdapter.put_stub(client, StubAdapter.respond(200, ~s({"models":[]})))
 
     assert {:ok, []} = TypeSafe.list_models(client)
     assert_received {:sent, request}
@@ -86,8 +85,7 @@ defmodule TypeSafe.ClientTest do
     assert client.default_model == "code-model"
     assert client.log_level == :error
 
-    stub = StubAdapter.respond(200, ~s({"models":[]}))
-    client = %{client | req: Req.Request.put_private(client.req, :typesafe_stub, stub)}
+    client = StubAdapter.put_stub(client, StubAdapter.respond(200, ~s({"models":[]})))
 
     assert {:ok, []} = TypeSafe.list_models(client)
     assert_received {:sent, request}
@@ -126,7 +124,19 @@ defmodule TypeSafe.ClientTest do
   # docs/spec.md §11 S1 #7 (client.test.ts:82-87)
   test "inspect(client) never contains the api key" do
     assert {:ok, client} = TypeSafe.new(api_key: "super-secret", get_env: fn _name -> nil end)
-    refute inspect(client) =~ "super-secret"
+
+    refute inspect(client, limit: :infinity, printable_limit: :infinity) =~ "super-secret"
+    refute Map.has_key?(client, :api_key)
+  end
+
+  # docs/spec.md §11 S1 AC(1) coverage gap (env.ts:16-19)
+  test "new/1 treats a blank TYPESAFE_API_KEY as unset and returns an error" do
+    env = %{"TYPESAFE_API_KEY" => "   "}
+
+    assert {:error, %TypeSafe.Error{message: message}} =
+             TypeSafe.new(get_env: fn name -> Map.get(env, name) end)
+
+    assert message =~ "TYPESAFE_API_KEY"
   end
 
   # docs/spec.md §11 S1 #8 (client.test.ts:131-147)
@@ -151,7 +161,10 @@ defmodule TypeSafe.ClientTest do
     assert [sdk_header] = Req.Request.get_header(request, "x-typesafe-sdk")
     assert sdk_header =~ ~r/^typesafe-sdk.*\/#{Regex.escape(TypeSafe.version())}$/
 
-    assert [_runtime] = Req.Request.get_header(request, "x-typesafe-runtime")
+    assert [runtime] = Req.Request.get_header(request, "x-typesafe-runtime")
+    assert runtime != ""
+
+    assert Req.Request.get_header(request, "accept") == ["application/json"]
     assert Req.Request.get_header(request, "content-type") == []
   end
 
@@ -315,6 +328,7 @@ defmodule TypeSafe.ClientTest do
     refute sdk_header =~ "bad"
     assert [runtime] = Req.Request.get_header(request, "x-typesafe-runtime")
     refute runtime =~ "bad"
+    assert runtime != ""
   end
 
   # docs/spec.md §11 S1 #16 (release-regressions.test.ts:60-70)
@@ -362,6 +376,14 @@ defmodule TypeSafe.ClientTest do
                %{state: "s", questions: %{q1: TypeSafe.noul("?")}},
                with_response: true
              )
+  end
+
+  # docs/spec.md §11 S1 #17 coverage gap (client.test.ts:164-174, api-promise.test.ts:21-39)
+  test "with_response: true works for list_models too" do
+    assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, ~s({"models":[]})))
+
+    assert {:ok, %{data: [], response: %Req.Response{status: 200}, request_id: nil}} =
+             TypeSafe.list_models(client, with_response: true)
   end
 
   # docs/spec.md §11 S1 #19 (errors.test.ts:127-133, success-path variant: new)

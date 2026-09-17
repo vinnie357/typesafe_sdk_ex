@@ -36,7 +36,18 @@ defmodule TypeSafe.StubAdapter do
       end)
 
     {:ok, client} = TypeSafe.new(opts)
-    {:ok, %{client | req: Req.Request.put_private(client.req, :typesafe_stub, stub)}}
+    {:ok, put_stub(client, stub)}
+  end
+
+  @doc """
+  Wire `stub` onto an already-built `client` (e.g. one built directly via
+  `TypeSafe.new/1` with `req_options: [adapter: TypeSafe.StubAdapter]`, for a
+  test that needs to assert on `TypeSafe.new/1`'s return value before sending
+  any request). Returns the client with the closure installed, not wrapped in
+  a tagged tuple, since `client` is already a plain struct here.
+  """
+  def put_stub(client, stub) do
+    %{client | req: Req.Request.put_private(client.req, :typesafe_stub, stub)}
   end
 
   @doc """
