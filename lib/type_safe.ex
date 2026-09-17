@@ -97,6 +97,16 @@ defmodule TypeSafe do
   A response whose body is not `%{"models" => [...]}` returns `{:error, %TypeSafe.Error{}}`
   instead of raising.
 
+  A non-2xx HTTP response returns the status-mapped error struct (spec §6):
+  `TypeSafe.Error.BadRequest` (400), `TypeSafe.Error.Authentication` (401),
+  `TypeSafe.Error.PermissionDenied` (403), `TypeSafe.Error.NotFound` (404),
+  `TypeSafe.Error.UnprocessableEntity` (422), `TypeSafe.Error.RateLimit` (429,
+  with `retry_after_ms`), `TypeSafe.Error.InternalServer` (5xx, including
+  529), or `TypeSafe.Error.API` for any other non-2xx status (e.g. 409, 418).
+  A transport failure returns `TypeSafe.Error.Timeout` (the configured
+  timeout was exceeded) or `TypeSafe.Error.Connection` (any other transport
+  failure — closed socket, DNS, TLS, etc.).
+
   Returns `{:ok, [map()]}` (or `{:ok, with_response_result}`) or `{:error, Exception.t()}`.
   """
   @spec list_models(TypeSafe.Client.t(), keyword()) ::
@@ -125,6 +135,16 @@ defmodule TypeSafe do
     A `nil` value deletes the header instead of sending it empty.
   - `:with_response` — when `true`, returns `t:with_response_result/0` instead of the bare
     body. Must be a boolean; a non-boolean value is rejected before any request is sent.
+
+  A non-2xx HTTP response returns the status-mapped error struct (spec §6):
+  `TypeSafe.Error.BadRequest` (400), `TypeSafe.Error.Authentication` (401),
+  `TypeSafe.Error.PermissionDenied` (403), `TypeSafe.Error.NotFound` (404),
+  `TypeSafe.Error.UnprocessableEntity` (422), `TypeSafe.Error.RateLimit` (429,
+  with `retry_after_ms`), `TypeSafe.Error.InternalServer` (5xx, including
+  529), or `TypeSafe.Error.API` for any other non-2xx status (e.g. 409, 418).
+  A transport failure returns `TypeSafe.Error.Timeout` (the configured
+  timeout was exceeded) or `TypeSafe.Error.Connection` (any other transport
+  failure — closed socket, DNS, TLS, etc.).
 
   Returns `{:ok, decoded_body}` (or `{:ok, with_response_result}`) or `{:error, Exception.t()}`.
   """

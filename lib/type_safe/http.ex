@@ -62,8 +62,11 @@ defmodule TypeSafe.HTTP do
              json: payload,
              receive_timeout: client.timeout
            ) do
-        {:ok, response} -> handle_response(response, with_response?)
-        {:error, exception} -> {:error, wrap_transport_error(exception)}
+        {:ok, response} ->
+          handle_response(response, with_response?)
+
+        {:error, exception} ->
+          {:error, TypeSafe.Errors.from_transport_error(exception, client.timeout)}
       end
     else
       {:error, %TypeSafe.Error{}} = error -> error
@@ -146,8 +149,11 @@ defmodule TypeSafe.HTTP do
     req = build_request(client, headers)
 
     case Req.request(req, method: :get, url: "/v1/models", receive_timeout: client.timeout) do
-      {:ok, response} -> handle_list_models_response(response, with_response?)
-      {:error, exception} -> {:error, wrap_transport_error(exception)}
+      {:ok, response} ->
+        handle_list_models_response(response, with_response?)
+
+      {:error, exception} ->
+        {:error, TypeSafe.Errors.from_transport_error(exception, client.timeout)}
     end
   end
 
@@ -162,8 +168,8 @@ defmodule TypeSafe.HTTP do
     end
   end
 
-  defp handle_list_models_response(%Req.Response{status: status}, _with_response?) do
-    {:error, %TypeSafe.Error{message: "#{status} error"}}
+  defp handle_list_models_response(%Req.Response{} = response, _with_response?) do
+    {:error, TypeSafe.Errors.from_response(response)}
   end
 
   defp unexpected_models_shape_error do
@@ -192,13 +198,20 @@ defmodule TypeSafe.HTTP do
     {:ok, finalize(decode_body(response), response, with_response?)}
   end
 
-  defp handle_response(%Req.Response{status: status}, _with_response?) do
-    {:error, %TypeSafe.Error{message: "#{status} error"}}
+  defp handle_response(%Req.Response{} = response, _with_response?) do
+    {:error, TypeSafe.Errors.from_response(response)}
   end
 
-  defp decode_body(%Req.Response{body: body}) when body in [nil, ""], do: nil
+  @doc """
+  Decodes a response body per §3: an empty body is `nil`, otherwise JSON is
+  tried regardless of content-type, falling back to the raw text on a parse
+  failure. Shared with `TypeSafe.Errors`, which needs the same decoded body
+  for both the struct's `body` field and §6 message extraction.
+  """
+  @spec decode_body(Req.Response.t()) :: term()
+  def decode_body(%Req.Response{body: body}) when body in [nil, ""], do: nil
 
-  defp decode_body(%Req.Response{body: body}) when is_binary(body) do
+  def decode_body(%Req.Response{body: body}) when is_binary(body) do
     case JSON.decode(body) do
       {:ok, decoded} -> decoded
       {:error, _reason} -> body
@@ -216,10 +229,6 @@ defmodule TypeSafe.HTTP do
       [id | _] -> id
       [] -> nil
     end
-  end
-
-  defp wrap_transport_error(exception) do
-    %TypeSafe.Error{message: Exception.message(exception)}
   end
 
   defp invalid_options_error(invalid_keys) do
