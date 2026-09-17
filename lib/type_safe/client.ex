@@ -1,9 +1,14 @@
 defmodule TypeSafe.Client do
   @moduledoc """
   Configured TypeSafe API client (spec `docs/spec.md` §2, §4). The API key lives
-  only as the `authorization` header on `req` — never as a plain struct field —
-  so it never appears in `inspect/2`: Req's `Inspect` implementation for
-  `Req.Request` redacts the `authorization` header value.
+  only as the `authorization` header on `req` — never as a plain struct field.
+
+  **Default `inspect/2` never prints the key**, because Req's `Inspect`
+  implementation for `Req.Request` redacts the `authorization` header value.
+  That redaction is specific to *default* `inspect` — it is bypassed by
+  `inspect(client, structs: false)` (which skips custom `Inspect`
+  implementations entirely) and by direct field access such as
+  `client.req.headers`. Neither of those is redacted.
   """
 
   @enforce_keys [:base_url, :default_model, :log_level, :retry, :timeout, :default_headers, :req]
