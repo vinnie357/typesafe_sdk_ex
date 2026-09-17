@@ -53,17 +53,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
 
+      # `mise run <task>` resolves tool versions straight from mise.toml's
+      # [tools] table and ignores MISE_ELIXIR_VERSION/MISE_ERLANG_VERSION —
+      # confirmed by a CI run where `mise run deps` tried to install the
+      # OTHER leg's pinned pair mid-job despite the override being active
+      # (and correctly honored moments earlier by `mise install` in the
+      # Setup mise step). `mise exec --` does respect the override, so every
+      # step below calls the underlying command through it instead of
+      # through a mise task.
       - name: Fetch deps
-        run: mise install && mise run deps
+        run: mise exec -- mix deps.get --check-locked
 
       - name: Format, compile, lint, test
         run: mise exec -- mix ci
 
       - name: Hex audit
-        run: mise run hex-audit
+        run: mise exec -- mix hex.audit
 
       # Gitleaks scans repository history, which is identical across legs —
       # run it once, on the pinned leg, rather than duplicating the scan.
       - name: Gitleaks
         if: matrix.run_gitleaks
-        run: mise run gitleaks
+        run: mise exec -- gitleaks detect --source . --no-banner
