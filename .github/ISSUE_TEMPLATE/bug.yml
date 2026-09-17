@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: typesafe_sdk_ex version
+      description: The dependency version or git commit you are using
+    validations:
+      required: true
+  - type: input
+    id: elixir-otp
+    attributes:
+      label: Elixir / OTP version
+      description: Output of `elixir --version`
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal code that reproduces the issue
+      render: elixir
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead, including any error message
+    validations:
+      required: true

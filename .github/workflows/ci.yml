@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ci (elixir ${{ matrix.elixir }} / otp ${{ matrix.otp }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Pinned pair — matches mise.toml's default tool versions.
+          - elixir: "1.19.5-otp-28"
+            otp: "28.4.2"
+            run_gitleaks: true
+          # Older pair covering mix.exs's `elixir: "~> 1.18"` claim.
+          - elixir: "1.18.5-otp-27"
+            otp: "27.3.4.17"
+            run_gitleaks: false
+    env:
+      MISE_ELIXIR_VERSION: ${{ matrix.elixir }}
+      MISE_ERLANG_VERSION: ${{ matrix.otp }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # mise-action's own tool cache uses one key shared across every matrix
+      # leg (not scoped by MISE_ELIXIR_VERSION/MISE_ERLANG_VERSION), which
+      # races when legs run in parallel. Disable it; the deps/_build cache
+      # below is scoped per leg and is the one that matters for CI time.
+      - name: Setup mise
+        uses: jdx/mise-action@v4
+        with:
+          cache: false
+
+      - name: Cache deps and _build
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('mix.lock', 'mise.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
+
+      # `mise run <task>` resolves tool versions straight from mise.toml's
+      # [tools] table and ignores MISE_ELIXIR_VERSION/MISE_ERLANG_VERSION —
+      # confirmed by a CI run where `mise run deps` tried to install the
+      # OTHER leg's pinned pair mid-job despite the override being active
+      # (and correctly honored moments earlier by `mise install` in the
+      # Setup mise step). `mise exec --` does respect the override, so every
+      # step below calls the underlying command through it instead of
+      # through a mise task.
+      - name: Fetch deps
+        run: mise exec -- mix deps.get --check-locked
+
+      - name: Format, compile, lint, test
+        run: mise exec -- mix ci
+
+      - name: Hex audit
+        run: mise exec -- mix hex.audit
+
+      # Gitleaks scans repository history, which is identical across legs —
+      # run it once, on the pinned leg, rather than duplicating the scan.
+      - name: Gitleaks
+        if: matrix.run_gitleaks
+        run: mise exec -- gitleaks detect --source . --no-banner
