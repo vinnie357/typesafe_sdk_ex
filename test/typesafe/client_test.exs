@@ -419,7 +419,8 @@ defmodule TypeSafe.ClientTest do
 
       for body <- bodies do
         assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, body))
-        assert {:error, %TypeSafe.Error{}} = TypeSafe.list_models(client)
+        assert {:error, %TypeSafe.Error{message: message}} = TypeSafe.list_models(client)
+        assert message =~ "Unexpected response shape from GET /v1/models"
       end
     end
 
@@ -429,79 +430,44 @@ defmodule TypeSafe.ClientTest do
 
       for body <- bodies do
         assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, body))
-        assert {:error, %TypeSafe.Error{}} = TypeSafe.list_models(client)
+        assert {:error, %TypeSafe.Error{message: message}} = TypeSafe.list_models(client)
+        assert message =~ "Unexpected response shape from GET /v1/models"
       end
     end
 
-    # Gate 4 review, PR #1, a935ea1: B2 (spec §5 L154) — a 503 must not be
-    # silently retried by Req's default `:safe_transient` policy. Proven fast:
-    # the stub answers 503 then 200; a fixed client never reaches the second
-    # response (1 call, immediate error). Today's hidden retry reaches it
-    # after one real backoff delay and returns {:ok, _}, failing this assertion.
-    test "B2: a GET answered 503 hits the adapter exactly once" do
-      {:ok, agent} = start_supervised({Agent, fn -> [503, 200] end})
+    # Gate 4 review, PR #1, 2467975 follow-up: B2 (spec §5 L154) — Req's
+    # built-in default retry (`:safe_transient`) must never be active on the
+    # client's request. The earlier "exactly once" call-count proof was a
+    # delayed fuse: it breaks the moment S3 legitimately retries a
+    # retryable 503 (spec §5 L123/127/134 — default policy is max_retries 2,
+    # 503 retryable), and its `%TypeSafe.Error{}` struct pattern breaks the
+    # moment S2 lands the status-mapped error taxonomy (spec §6 — a 503
+    # becomes `TypeSafe.Error.InternalServer`, not `TypeSafe.Error`). This
+    # version asserts the durable invariant instead: `client.req.options[:retry]`
+    # is never Req's implicit default (`nil`, today's actual bug) or either
+    # named preset — it must be `false` (the interim S1 fix per spec §5 "pass
+    # retry: false in the base Req options until S3 swaps in decide/2") or,
+    # after S3, the `decide/2` function, neither of which is in this list.
+    # The response-side match is loose (`{:error, _}`) so it survives S2.
+    test "B2: the client req never carries Req's built-in default retry, and a 503 still errors" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(503, ~s({"models":[]})))
+
+      refute client.req.options[:retry] in [nil, :safe_transient, :transient]
+      assert {:error, _reason} = TypeSafe.list_models(client)
+    end
+
+    test "B2: the client req never carries Req's built-in default retry, and a transport error still errors" do
       test_pid = self()
 
       stub = fn request ->
-        status =
-          Agent.get_and_update(agent, fn
-            [next] -> {next, [next]}
-            [next | rest] -> {next, rest}
-          end)
-
         send(test_pid, {:sent, request})
-
-        {request,
-         Req.Response.new(
-           status: status,
-           headers: [{"content-type", "application/json"}],
-           body: ~s({"models":[]})
-         )}
+        {request, Req.TransportError.exception(reason: :closed)}
       end
 
       assert {:ok, client} = StubAdapter.client(stub)
 
-      assert {:error, %TypeSafe.Error{}} = TypeSafe.list_models(client)
-
-      assert_received {:sent, _request}
-      refute_received {:sent, _request}
-    end
-
-    # Gate 4 review, PR #1, a935ea1: B2, the transport-error sibling — Req's
-    # default retry also covers `:closed`/similar reasons, not only statuses.
-    test "B2: a GET answered with a transport error hits the adapter exactly once" do
-      {:ok, agent} = start_supervised({Agent, fn -> [:error, :ok] end})
-      test_pid = self()
-
-      stub = fn request ->
-        outcome =
-          Agent.get_and_update(agent, fn
-            [next] -> {next, [next]}
-            [next | rest] -> {next, rest}
-          end)
-
-        send(test_pid, {:sent, request})
-
-        case outcome do
-          :error ->
-            {request, Req.TransportError.exception(reason: :closed)}
-
-          :ok ->
-            {request,
-             Req.Response.new(
-               status: 200,
-               headers: [{"content-type", "application/json"}],
-               body: ~s({"models":[]})
-             )}
-        end
-      end
-
-      assert {:ok, client} = StubAdapter.client(stub)
-
-      assert {:error, %TypeSafe.Error{}} = TypeSafe.list_models(client)
-
-      assert_received {:sent, _request}
-      refute_received {:sent, _request}
+      refute client.req.options[:retry] in [nil, :safe_transient, :transient]
+      assert {:error, _reason} = TypeSafe.list_models(client)
     end
 
     # Gate 4 review, PR #1, a935ea1: B3 (JS client.ts:318) — an explicit nil
@@ -625,6 +591,21 @@ defmodule TypeSafe.ClientTest do
                )
 
       assert {:ok, []} = TypeSafe.list_models(client)
+      assert_received {:sent, request}
+      assert Req.Request.get_header(request, "x-a") == []
+    end
+
+    # Gate 4 review, PR #1, 2467975 follow-up: N8, the per-call sibling — a
+    # nil per-call header value must delete a header already set by
+    # default_headers, not overwrite it with the empty string.
+    test "N8: a per-call nil value deletes a header set by default_headers" do
+      assert {:ok, client} =
+               StubAdapter.client(
+                 StubAdapter.respond(200, ~s({"models":[]})),
+                 default_headers: %{"X-A" => "1"}
+               )
+
+      assert {:ok, []} = TypeSafe.list_models(client, headers: %{"x-a" => nil})
       assert_received {:sent, request}
       assert Req.Request.get_header(request, "x-a") == []
     end
