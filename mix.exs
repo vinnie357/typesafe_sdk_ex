@@ -10,6 +10,7 @@ defmodule TypeSafe.MixProject do
       version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       elixirc_options: elixirc_options(Mix.env()),
       deps: deps(),
       description: description(),
@@ -32,6 +33,9 @@ defmodule TypeSafe.MixProject do
 
   defp elixirc_options(:test), do: [warnings_as_errors: true]
   defp elixirc_options(_), do: []
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help deps" to learn about dependencies.
   defp deps do
