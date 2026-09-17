@@ -3,19 +3,47 @@ defmodule TypeSafe.ErrorTest do
 
   alias TypeSafe.StubAdapter
 
-  # docs/spec.md §11 S2 #1 (errors.test.ts:20-40; 529 is new, from api.md:L319).
-  # Also covers the general "every error is an Exception" check: §6 documents
-  # a shared field contract (status, body, headers, request_id, message) but
-  # names no literal shared Elixir struct/protocol the way JS's class chain
-  # does — see the report for this ambiguity. is_exception/1 plus
-  # Exception.message/1 is the closest Elixir equivalent of "inherits from a
-  # common base" that the spec text actually supports.
+  # Gate 4 review follow-up on 1834b35 (S3 delayed fuse): every client this
+  # file builds funnels through here, so S3 has exactly one place to add
+  # `retry: [max_retries: 0]` once new/1 supports a :retry option (it
+  # doesn't yet — spec §10 S2 AC: "The tests run with max_retries: 0"). Do
+  # not add the option now; only the funnel point is the fix for this round.
+  defp error_client(status, body, headers \\ [{"content-type", "application/json"}]) do
+    build_client(StubAdapter.respond(status, body, headers), [])
+  end
+
+  defp error_client(status, body, headers, opts) do
+    build_client(StubAdapter.respond(status, body, headers), opts)
+  end
+
+  defp error_client(stub) when is_function(stub, 1) do
+    build_client(stub, [])
+  end
+
+  defp build_client(stub, opts) do
+    StubAdapter.client(stub, opts)
+  end
+
+  # docs/spec.md §11 S2 #1 (errors.test.ts:20-40; 529 is new, from
+  # api.md:L319; 409 added — non-blocking finding, §6 names it alongside
+  # 418 as an APIError example). Also covers §6's full per-status field
+  # contract (status, body, headers, request_id, message) for EVERY mapped
+  # status, not only 401 (Gate 4 review follow-up on 1834b35: the field
+  # assertions were previously only exercised once, in the #2+#3 test
+  # below, so a struct missing headers/request_id entirely would have
+  # passed this test). Also covers the general "every error is an
+  # Exception" check: §6 documents a shared field contract but names no
+  # literal shared Elixir struct/protocol the way JS's class chain does —
+  # see the report for this ambiguity. is_exception/1 plus
+  # Exception.message/1 is the closest Elixir equivalent of "inherits from
+  # a common base" that the spec text actually supports.
   test "maps status to struct" do
     cases = [
       {400, TypeSafe.Error.BadRequest},
       {401, TypeSafe.Error.Authentication},
       {403, TypeSafe.Error.PermissionDenied},
       {404, TypeSafe.Error.NotFound},
+      {409, TypeSafe.Error.API},
       {422, TypeSafe.Error.UnprocessableEntity},
       {429, TypeSafe.Error.RateLimit},
       {500, TypeSafe.Error.InternalServer},
@@ -25,11 +53,21 @@ defmodule TypeSafe.ErrorTest do
     ]
 
     for {status, expected_module} <- cases do
-      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(status, ~s({})))
+      body = ~s({"error":"boom #{status}"})
+
+      assert {:ok, client} =
+               error_client(status, body, [
+                 {"content-type", "application/json"},
+                 {"x-typesafe-request-id", "req_#{status}"}
+               ])
+
       assert {:error, error} = TypeSafe.list_models(client)
 
       assert error.__struct__ == expected_module
       assert error.status == status
+      assert error.body == %{"error" => "boom #{status}"}
+      assert error.headers["x-typesafe-request-id"] == ["req_#{status}"]
+      assert error.request_id == "req_#{status}"
       assert is_exception(error)
       assert Exception.message(error) == error.message
     end
@@ -38,12 +76,10 @@ defmodule TypeSafe.ErrorTest do
   # docs/spec.md §11 S2 #2+#3 (errors.test.ts:43-57) — combined, same JS test.
   test "every API error carries status, body, headers, request_id; message uses error.message" do
     assert {:ok, client} =
-             StubAdapter.client(
-               StubAdapter.respond(401, ~s({"error":{"message":"invalid api key"}}), [
-                 {"content-type", "application/json"},
-                 {"x-typesafe-request-id", "req_123"}
-               ])
-             )
+             error_client(401, ~s({"error":{"message":"invalid api key"}}), [
+               {"content-type", "application/json"},
+               {"x-typesafe-request-id", "req_123"}
+             ])
 
     assert {:error, error} = TypeSafe.list_models(client)
 
@@ -68,7 +104,7 @@ defmodule TypeSafe.ErrorTest do
     ]
 
     for {body, expected_detail} <- cases do
-      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(400, body))
+      assert {:ok, client} = error_client(400, body)
       assert {:error, error} = TypeSafe.list_models(client)
 
       assert error.message == "400 " <> expected_detail
@@ -80,12 +116,12 @@ defmodule TypeSafe.ErrorTest do
   # re-encoded term (spec §6, §12 q17), so the fixture bodies below are
   # already the raw wire text the message must reproduce verbatim.
   test "message falls back to the raw body text when nothing is extractable, truncated to 200 chars" do
-    assert {:ok, client} = StubAdapter.client(StubAdapter.respond(400, ~s({"code":7})))
+    assert {:ok, client} = error_client(400, ~s({"code":7}))
     assert {:error, short_error} = TypeSafe.list_models(client)
     assert short_error.message == ~s(400 {"code":7})
 
     long_body = ~s({"blob":") <> String.duplicate("x", 500) <> ~s("})
-    assert {:ok, client} = StubAdapter.client(StubAdapter.respond(400, long_body))
+    assert {:ok, client} = error_client(400, long_body)
     assert {:error, long_error} = TypeSafe.list_models(client)
 
     assert String.length(long_error.message) == String.length("400 ") + 200 + 1
@@ -95,9 +131,7 @@ defmodule TypeSafe.ErrorTest do
   # docs/spec.md §11 S2 #7 (errors.test.ts:104-115).
   test "a non-JSON error body is kept as text" do
     assert {:ok, client} =
-             StubAdapter.client(
-               StubAdapter.respond(502, "<h1>bad gateway</h1>", [{"content-type", "text/html"}])
-             )
+             error_client(502, "<h1>bad gateway</h1>", [{"content-type", "text/html"}])
 
     assert {:error, %TypeSafe.Error.InternalServer{} = error} = TypeSafe.list_models(client)
 
@@ -107,7 +141,7 @@ defmodule TypeSafe.ErrorTest do
 
   # docs/spec.md §11 S2 #8 (errors.test.ts:117-125).
   test "an empty error body gives \"<status> status code (no body)\" with a nil body" do
-    assert {:ok, client} = StubAdapter.client(StubAdapter.respond(429, ""))
+    assert {:ok, client} = error_client(429, "")
 
     assert {:error, %TypeSafe.Error.RateLimit{} = error} = TypeSafe.list_models(client)
 
@@ -118,8 +152,7 @@ defmodule TypeSafe.ErrorTest do
   # docs/spec.md §11 S2 #9 (reliability.test.ts:538-545). Uses the same
   # Retry-After parser as §5 — "7" seconds -> 7000 ms.
   test "RateLimit exposes retry_after_ms parsed from Retry-After" do
-    assert {:ok, client} =
-             StubAdapter.client(StubAdapter.respond(429, ~s({}), [{"retry-after", "7"}]))
+    assert {:ok, client} = error_client(429, ~s({}), [{"retry-after", "7"}])
 
     assert {:error, %TypeSafe.Error.RateLimit{retry_after_ms: 7000}} =
              TypeSafe.list_models(client)
@@ -127,7 +160,7 @@ defmodule TypeSafe.ErrorTest do
 
   # docs/spec.md §11 S2 #10 (reliability.test.ts:547-553).
   test "RateLimit retry_after_ms is nil when Retry-After is absent" do
-    assert {:ok, client} = StubAdapter.client(StubAdapter.respond(429, ~s({}), []))
+    assert {:ok, client} = error_client(429, ~s({}), [])
 
     assert {:error, %TypeSafe.Error.RateLimit{retry_after_ms: nil}} =
              TypeSafe.list_models(client)
@@ -145,7 +178,7 @@ defmodule TypeSafe.ErrorTest do
       {request, Req.TransportError.exception(reason: :closed)}
     end
 
-    assert {:ok, client} = StubAdapter.client(stub)
+    assert {:ok, client} = error_client(stub)
 
     assert {:error, %TypeSafe.Error.Connection{reason: :closed} = error} =
              TypeSafe.list_models(client)
@@ -164,7 +197,7 @@ defmodule TypeSafe.ErrorTest do
       {request, Req.TransportError.exception(reason: :timeout)}
     end
 
-    assert {:ok, client} = StubAdapter.client(stub)
+    assert {:ok, client} = error_client(stub)
 
     assert {:error, %TypeSafe.Error.Timeout{timeout_ms: 10_000} = error} =
              TypeSafe.list_models(client)
@@ -192,7 +225,7 @@ defmodule TypeSafe.ErrorTest do
     ]
 
     for body <- bodies do
-      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, body))
+      assert {:ok, client} = error_client(200, body)
       assert {:error, %TypeSafe.Error{message: message}} = TypeSafe.list_models(client)
       assert message =~ "Unexpected response shape from GET /v1/models"
     end
@@ -202,8 +235,10 @@ defmodule TypeSafe.ErrorTest do
   # an error struct or its message.
   test "the api key never appears in an error struct or its message" do
     assert {:ok, client} =
-             StubAdapter.client(
-               StubAdapter.respond(401, ~s({"error":"invalid"})),
+             error_client(
+               401,
+               ~s({"error":"invalid"}),
+               [{"content-type", "application/json"}],
                api_key: "super-secret-key"
              )
 
@@ -224,7 +259,7 @@ defmodule TypeSafe.ErrorTest do
     body =
       ~s({"model":"jev-1.13.0","answers":{"q1":{"type":"noul","noul":0.5}},"usage":{"input_tokens":1,"output_tokens":1}})
 
-    assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, body))
+    assert {:ok, client} = error_client(200, body)
 
     assert {:ok, result} =
              TypeSafe.system_one(client, %{state: "s", questions: %{q1: TypeSafe.noul("?")}})
