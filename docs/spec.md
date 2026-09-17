@@ -116,6 +116,10 @@ Option **keys** are checked with `Keyword.validate/2`. verified: it returns `{:o
 
 Per-call validation errors (bad `timeout` or `retry`) come back before any request is sent (`reliability.test.ts:168-180,402-421`). Elixir returns `{:error, %TypeSafe.Error{}}` in that case.
 
+**`req_options` cannot override SDK-owned request settings (Gate 4 review round 2, R2, operator decision).** `req_options` is the caller's escape hatch into `Req.new/1` — the Elixir analogue of JS's `fetch` option — not a route around the client's own guarantees. `base_url` and `auth` are forced the same way `decode_body` and `retry` already are (§3): a `req_options: [base_url: ...]` or `req_options: [auth: ...]` value is silently overridden, so the client's configured `base_url` and `authorization` header are what the request actually uses, regardless of what `req_options` requests. `receive_timeout` is handled differently: it is **rejected** at `new/1` with `{:error, %TypeSafe.Error{}}` naming the option, not silently overridden — `receive_timeout` has its own future `:timeout` option (§5, S3), so accepting it via `req_options` and then ignoring it would be a silent no-op that misleads a caller into believing their timeout took effect.
+
+**`inspect(%TypeSafe.RetryPolicy{})` renders `http_statuses` compactly (operator decision, new).** The default derived `Inspect` enumerates the ~100 individual members of the `http_statuses` `MapSet` in hash order, which is unreadable and useless for confirming the default policy. The intended rendering is a compact summary reading (in this shape) `408, 429, 500..599` — read as "exactly {408, 429} ∪ 500..599, and nothing else" — via a custom `Inspect` implementation. This affects `inspect/1` on a bare `%TypeSafe.RetryPolicy{}` and, because it is a nested field, on any `%TypeSafe.Client{}` value too.
+
 ## 5. Retry and timeout semantics
 
 **Default policy** (`retry.ts:11-23`; confirmed by `sdk/javascript/api/interfaces/RetryPolicy.md`):
