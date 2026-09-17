@@ -847,16 +847,21 @@ defmodule TypeSafe.ClientTest do
     # Operator request (new, not a lettered finding): inspect/1 on a
     # %TypeSafe.RetryPolicy{} must not dump the ~100-element http_statuses
     # MapSet as raw, hash-ordered numbers. Pinned rendering (recorded in
-    # docs/spec.md §4): a custom Inspect implementation renders
-    # http_statuses as a compact summary containing "408", "429", and
-    # "500..599" — the intended reading is that the default set is exactly
-    # {408, 429} ∪ 500..599, and nothing else. verified today: the derived
-    # struct inspect is 620 characters and enumerates individual members in
-    # hash order (e.g. "545, 533, 597, 500, ...") with no range notation.
+    # docs/spec.md §4): a custom Inspect implementation keeps all nine
+    # fields visible and renders http_statuses as a compact summary
+    # containing "408", "429", and "500..599" — the intended reading is
+    # that the default set is exactly {408, 429} ∪ 500..599, and nothing
+    # else. verified today: the derived struct inspect is 620 characters
+    # and enumerates individual members in hash order (e.g. "545, 533,
+    # 597, 500, ...") with no range notation. Operator decision (Gate 4
+    # follow-up on 6701bd5): the length bound is 300, not 200 — a full
+    # nine-field labelled rendering with the compact http_statuses summary
+    # measures ~248 chars (field names alone are 144), so 200 was
+    # unreachable without hiding a field nobody asked to hide.
     test "inspect(%TypeSafe.RetryPolicy{}) renders http_statuses compactly, not as a number dump" do
       rendered = inspect(%TypeSafe.RetryPolicy{})
 
-      assert String.length(rendered) < 200
+      assert String.length(rendered) < 300
       assert rendered =~ "408"
       assert rendered =~ "429"
       assert rendered =~ "500..599"
