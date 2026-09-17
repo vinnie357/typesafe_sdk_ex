@@ -1,0 +1,33 @@
+[tools]
+erlang = "28.4.2"
+elixir = "1.19.5-otp-28"
+gitleaks = "latest"
+
+[tasks.deps]
+description = "Fetch mix dependencies"
+run = "mix deps.get"
+
+[tasks.format]
+description = "Check formatting"
+run = "mix format --check-formatted"
+
+[tasks.compile]
+description = "Compile with warnings as errors"
+run = "mix compile --warnings-as-errors"
+
+[tasks.credo]
+description = "Run credo strict analysis"
+run = "mix credo --strict"
+
+[tasks.test]
+description = "Run the test suite"
+run = "mix test --warnings-as-errors"
+
+[tasks.gitleaks]
+description = "Scan repository history for secrets"
+run = "gitleaks detect --source . --no-banner"
+
+[tasks.ci]
+description = "Full local CI gate"
+depends = ["deps"]
+run = ["mix ci", "mise run gitleaks"]
