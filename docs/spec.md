@@ -242,7 +242,7 @@ Exact wire output (`questions.ts:22-63`, `client.test.ts:262-322`, `client.test.
 | `noul(i)` | `%{type: "noul", instructions: i}`, criteria omitted (`client.test.ts:236,279`) |
 | `noul(i, c)` | `%{type: "noul", instructions: i, criteria: c}`. `c` may be `nil`, which is sent as `null` (`client.test.ts:329`). Either or both of `true`/`false` may be present (`client.test.ts:278-287`). |
 | `choice(i, criteria_map)` | `%{type: "choice", instructions: i, criteria: map}`, passed through without rewriting. A list is rejected (`questions.ts:59-61`, `client.test.ts:271-276`). |
-| `score(i, criteria_list)` | `%{type: "score", instructions: i, criteria: list}`, passed through. A map is rejected with the message `"Score criteria must be a list of descriptions indexed by score from zero, not a map."` (`questions.ts:41-45`). |
+| `score(i, criteria_list)` | `%{type: "score", instructions: i, criteria: list}`, passed through. A map is rejected; JS throws `TypeSafeError` with the message `"Score criteria must be a list of descriptions indexed by score from zero, not a map."` (`questions.ts:41-45`). This message is JS-only — per the "Builder shape errors" bullet below, the Elixir builder uses a guard clause and raises `FunctionClauseError` instead, with no custom message. |
 
 - Descriptions and instructions may be a string, a JSON-able map or list, or nil (`types.ts:11,17-18`, `client.test.ts:289-294`). This conflicts with the docs (§12).
 - Builder shape errors: use guard clauses (`is_map`/`is_list`), so bad input raises `FunctionClauseError`. That is a programmer error and matches the JS runtime throw.
