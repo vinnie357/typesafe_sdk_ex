@@ -37,9 +37,7 @@ defmodule TypeSafe.MixProject do
   defp deps do
     [
       {:req, "~> 0.7.4"},
-      {:plug, "~> 1.20", only: :test},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.40", only: :dev, runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 
