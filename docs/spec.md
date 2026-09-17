@@ -81,6 +81,8 @@ Header precedence: `default_headers` < per-call `headers` < protected SDK header
 
 Req's default decoder picks a format by content-type (`req@0.7.4 lib/req/steps.ex:1160-1175`), so it cannot parse JSON sent without one. The port therefore sets `decode_body: false` and calls Elixir's built-in `JSON.decode/1`. verified: it returns `{:ok, %{"a" => 1}}` for JSON and `{:error, {:invalid_byte, 0, 60}}` for HTML. Request bodies are encoded with Req's `:json` option, which also sets `content-type` and `accept` (`steps.ex:489-492`).
 
+**`decode_body` is SDK-owned (Gate 4 review N12).** `req_options` (§4) is a caller-supplied keyword list merged into `Req.new/1`, but `decode_body: false` above is a hard SDK requirement, not a mere default: the port's own JSON decoding depends on it. A caller-supplied `req_options: [decode_body: ...]` is therefore **overridden**, not rejected — `new/1` still returns `{:ok, client}`, and the client's `decode_body` stays `false` regardless of what `req_options` requested.
+
 **Env vars** (`env.ts:2-11`):
 
 | Var | Option | Default |
@@ -248,10 +250,13 @@ Exact wire output (`questions.ts:22-63`, `client.test.ts:262-322`, `client.test.
 - Builder shape errors: use guard clauses (`is_map`/`is_list`), so bad input raises `FunctionClauseError`. That is a programmer error and matches the JS runtime throw.
 - Callers may also pass raw question maps (`client.test.ts:337-356`).
 
+**Request shape contract (§12 q12, RESOLVED — operator decision, Gate 4 review N5).** `system_one/3`'s `request` is atom-keyed: `%{state: term(), questions: %{atom() => question}, ...extra}`, matching the signature at §2 (`TypeSafe.system_one(client, %{state:, questions:} = request, opts)`). A request missing `:state`, or a string-keyed request map (e.g. one decoded straight from JSON), is a caller error and returns `{:error, %TypeSafe.Error{}}` with **zero** HTTP calls — it does not raise `FunctionClauseError`, and it is not normalized. This is a deliberate deviation from JS: JS forwards a request object structurally, so a missing `state` key sends `"state":undefined`, which `JSON.stringify` drops from the wire body entirely rather than erroring. The Elixir port requires the field.
+
 **Pre-send validation in `system_one/3`** (`questions.ts:70-89`). Each failure returns `{:error, %TypeSafe.Error{}}` and makes **zero** HTTP calls (`client.test.ts:377-395`):
 - empty questions → `"At least one question is required."`
 - a score whose criteria is not a list → `Score question "q" has criteria that are not a list; …`
 - fewer than 2 criteria → `Score question "q" has <n> criteria; at least two scores are required.`
+- a score question with no `criteria` key at all (atom- or string-keyed) → an error, the same as non-list criteria (`questions.ts:75`, Gate 4 review B4)
 
 **Answers** come back as the decoded JSON map with string keys, `result["answers"]["q"]["choice"]`. TypeScript's inference of answer types (`types.ts:117-142`, `test/types.test-d.ts`) has **no Elixir equivalent, and none is built**. Elixir provides `@type` specs for documentation only. There are no answer structs and no typed-accessor maps like Python's `nouls` / `choices` / `scores` (`sdk/python/api/types/responses.md:L160-L276`).
 
@@ -484,14 +489,14 @@ Stubbed (every client uses zero backoff):
 9. **Total retry budget.** Python `RetryPolicy.timeout = 30.0`s total (`sdk/python/api/retries.md:L428-L430`). JS has none (`types.ts:200`). Python also has `exceptions` and `predicate` (`retries.md:L364,L376`), which JS rejects (`test/types.test-d.ts:132-133`). The spec follows JS.
 10. **Response validation.** Python raises `TypeSafeAPIResponseValidationError` with `field_path` (`sdk/python/api/exceptions.md:L254-L272`). JS returns unvalidated JSON except for `/v1/models`. The spec follows JS (restraint).
 11. **Log levels and redaction.** Python uses `warning` and defaults to unset (`sdk/python/usage.md`, Logging and Env table). JS uses `warn` (`logging.ts:5-7`). Python redacts any header whose name contains `token` or `secret`; JS redacts a fixed list (`logging.ts:54-61`). Elixir `Logger` says `:warning`. Proposal: accept `"warn"` and `"warning"`, and keep JS's redaction list.
-12. **API shape.** Python uses `system_one(state, questions, *, model, retry, timeout, extra_headers, extra_body)` and groups responses as `nouls` / `choices` / `scores` (`sdk/python/api/clients/sync/client.md`). JS uses a request object with spread extras. For Elixir, `system_one(client, %{state:, questions:} = request, opts)` stays closest to the JS tests. A Python-style `system_one(client, state, questions, opts)` would also be idiomatic. **Needs a decision.**
+12. **API shape. RESOLVED — operator decision.** Python uses `system_one(state, questions, *, model, retry, timeout, extra_headers, extra_body)` and groups responses as `nouls` / `choices` / `scores` (`sdk/python/api/clients/sync/client.md`). JS uses a request object with spread extras. Elixir uses `system_one(client, %{state:, questions:} = request, opts \\ [])`, staying closest to the JS tests. See §8 "Request shape contract" for the atom-keyed, `:state`-required consequence of this decision.
 
 **Unresolved from source.**
 
 13. **Timeout semantics.** JS bounds headers plus the full body per attempt (`client.ts:403-447`). Req `receive_timeout` is a socket-receive timeout (`req@0.7.4 lib/req.ex:445`), so a server that trickles its body can exceed the total. Is that acceptable, or does the port need a `Task.await`-bounded attempt?
 14. **`User-Agent` / `X-TypeSafe-SDK` / `X-TypeSafe-Runtime` values** for the Elixir SDK. Options are `typesafe-sdk/<ex-version>` or `typesafe-sdk-ex/<version>`, and `elixir/<System.version()> (otp/<release>)`. Whether the server parses these is unknown.
 15. **Retry-After number parsing.** JS `Number()` accepts `"0x10"`, `"1e3"`, and whitespace (`retry.ts:44`). Proposal: support non-negative decimals only.
-16. **Explicit empty `api_key: ""`.** JS accepts it, because `??` falls back only on null/undefined (`env.ts:22-23`), and then sends `Bearer `. Mirror that or reject it? Proposal: reject blank, the same as env. No test pins the JS behavior.
+16. **Explicit empty `api_key: ""`. RESOLVED — operator decision (Gate 4 review N7).** JS accepts it, because `??` falls back only on null/undefined (`env.ts:22-23`), and then sends `Bearer `. The Elixir port does NOT mirror that: an explicit blank or whitespace-only `api_key` option (`""`, `"   "`) is rejected with the same `{:error, %TypeSafe.Error{message: m}}` (`m =~ "TYPESAFE_API_KEY"`) as a blank environment value — an explicit blank is treated identically to "not given," not as "given but empty."
 17. **Raw-body error message.** JS re-stringifies the parsed body (`errors.ts:64`); Elixir uses the original text (§6). The two differ only when the server sends non-compact JSON. Is that acceptable?
 18. **`:inets` in releases.** `:httpd_util` works in `mix`/`elixir` without starting inets (verified). Whether a release needs `:inets` in `extra_applications` to bundle it requires verification in a release build. Resolved from the earlier draft: log capture now goes through the `logger:` option (§7, verified), and the HTTP-date parser is `:httpd_util` (§5, verified).
 19. **Request-tag numbering.** JS `#1` is per client. Elixir uses a VM-wide monotonic integer. Is that acceptable?
