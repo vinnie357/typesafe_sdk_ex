@@ -7,15 +7,20 @@ defmodule TypeSafe.HTTP do
 
   @doc """
   Builds the base `Req.Request` for a client: `base_url` plus `req_options`
-  merged in, then `decode_body: false` and `retry: false` forced (SDK-owned,
-  spec §3, §5 — `req_options` cannot re-enable either), then the
-  `authorization` header. Used by `TypeSafe.Config.build/1`.
+  merged in, then the SDK-owned settings forced back on top (spec §4 R2) —
+  `base_url` and `decode_body: false`/`retry: false` are forced to the
+  client's own values, and a caller-supplied `:auth` is dropped so Req's
+  built-in `:auth` step can never overwrite the `authorization` header we
+  set below. `receive_timeout` is rejected earlier, at `TypeSafe.Config`
+  validation time, so it never reaches here. Used by `TypeSafe.Config.build/1`.
   """
   @spec new_client_req(String.t(), keyword(), String.t()) :: Req.Request.t()
   def new_client_req(base_url, req_options, api_key) do
     req_config =
       [base_url: base_url]
       |> Keyword.merge(req_options)
+      |> Keyword.delete(:auth)
+      |> Keyword.put(:base_url, base_url)
       |> Keyword.put(:decode_body, false)
       |> Keyword.put(:retry, false)
 
@@ -67,20 +72,63 @@ defmodule TypeSafe.HTTP do
   end
 
   def system_one(%TypeSafe.Client{}, request, _opts) when is_map(request) do
-    {:error,
-     %TypeSafe.Error{
-       message:
-         "system_one/3 request must be an atom-keyed map with a :state key, e.g. " <>
-           "%{state: ..., questions: ...}."
-     }}
+    {:error, %TypeSafe.Error{message: malformed_request_message(request)}}
+  end
+
+  # Names the actual problem (spec §8, Gate 4 review round 2 R5): whichever
+  # required key is missing or wrong is named, not always ":state" — this
+  # clause is only reached when the primary system_one/3 clause's pattern or
+  # `is_map(questions)` guard failed, so at least one of the two is bad.
+  defp malformed_request_message(request) do
+    case Map.has_key?(request, :state) do
+      true ->
+        "system_one/3 request's :questions must be an atom-keyed map, " <>
+          "e.g. %{state: ..., questions: %{...}}."
+
+      false ->
+        "system_one/3 request must be an atom-keyed map with a :state key, " <>
+          "e.g. %{state: ..., questions: %{...}}."
+    end
   end
 
   defp validate_call_opts(opts) do
+    case validate_with_response(opts) do
+      :ok -> validate_headers_opt(opts)
+      {:error, %TypeSafe.Error{}} = error -> error
+    end
+  end
+
+  defp validate_with_response(opts) do
     case Keyword.fetch(opts, :with_response) do
       :error -> :ok
       {:ok, value} -> validate_predicate(is_boolean(value), "with_response must be a boolean")
     end
   end
+
+  defp validate_headers_opt(opts) do
+    case Keyword.fetch(opts, :headers) do
+      :error ->
+        :ok
+
+      {:ok, headers} ->
+        validate_predicate(
+          valid_headers?(headers),
+          "headers must be a map with binary/atom/number/nil values (lists are not allowed)"
+        )
+    end
+  end
+
+  defp valid_headers?(headers) when is_map(headers) do
+    Enum.all?(headers, fn {_name, value} -> valid_header_value?(value) end)
+  end
+
+  defp valid_headers?(_headers), do: false
+
+  defp valid_header_value?(nil), do: true
+  defp valid_header_value?(value) when is_binary(value), do: true
+  defp valid_header_value?(value) when is_atom(value), do: true
+  defp valid_header_value?(value) when is_number(value), do: true
+  defp valid_header_value?(_value), do: false
 
   defp validate_predicate(true, _message), do: :ok
   defp validate_predicate(false, message), do: {:error, %TypeSafe.Error{message: message}}
