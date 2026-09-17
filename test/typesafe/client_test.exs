@@ -404,4 +404,244 @@ defmodule TypeSafe.ClientTest do
     assert {:ok, nil} =
              TypeSafe.system_one(client, %{state: "s", questions: %{q1: TypeSafe.noul("?")}})
   end
+
+  describe "review fixes" do
+    # Gate 4 review, PR #1, a935ea1: B1 (spec §3 L55, JS models.ts:23-28) — any
+    # body other than {"models": [...]} must be an error, never a raise.
+    test "B1: list_models errors instead of raising when the body is not a {models: [...]} map" do
+      bodies = [
+        ~s(<html>oops</html>),
+        ~s([]),
+        ~s(null),
+        ~s({"ok":true}),
+        ""
+      ]
+
+      for body <- bodies do
+        assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, body))
+        assert {:error, %TypeSafe.Error{}} = TypeSafe.list_models(client)
+      end
+    end
+
+    # Gate 4 review, PR #1, a935ea1: B1, the "models" key present but not a list.
+    test "B1: list_models errors when \"models\" is present but not a list" do
+      bodies = [~s({"models":"bad"}), ~s({"models":null})]
+
+      for body <- bodies do
+        assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, body))
+        assert {:error, %TypeSafe.Error{}} = TypeSafe.list_models(client)
+      end
+    end
+
+    # Gate 4 review, PR #1, a935ea1: B2 (spec §5 L154) — a 503 must not be
+    # silently retried by Req's default `:safe_transient` policy. Proven fast:
+    # the stub answers 503 then 200; a fixed client never reaches the second
+    # response (1 call, immediate error). Today's hidden retry reaches it
+    # after one real backoff delay and returns {:ok, _}, failing this assertion.
+    test "B2: a GET answered 503 hits the adapter exactly once" do
+      {:ok, agent} = start_supervised({Agent, fn -> [503, 200] end})
+      test_pid = self()
+
+      stub = fn request ->
+        status =
+          Agent.get_and_update(agent, fn
+            [next] -> {next, [next]}
+            [next | rest] -> {next, rest}
+          end)
+
+        send(test_pid, {:sent, request})
+
+        {request,
+         Req.Response.new(
+           status: status,
+           headers: [{"content-type", "application/json"}],
+           body: ~s({"models":[]})
+         )}
+      end
+
+      assert {:ok, client} = StubAdapter.client(stub)
+
+      assert {:error, %TypeSafe.Error{}} = TypeSafe.list_models(client)
+
+      assert_received {:sent, _request}
+      refute_received {:sent, _request}
+    end
+
+    # Gate 4 review, PR #1, a935ea1: B2, the transport-error sibling — Req's
+    # default retry also covers `:closed`/similar reasons, not only statuses.
+    test "B2: a GET answered with a transport error hits the adapter exactly once" do
+      {:ok, agent} = start_supervised({Agent, fn -> [:error, :ok] end})
+      test_pid = self()
+
+      stub = fn request ->
+        outcome =
+          Agent.get_and_update(agent, fn
+            [next] -> {next, [next]}
+            [next | rest] -> {next, rest}
+          end)
+
+        send(test_pid, {:sent, request})
+
+        case outcome do
+          :error ->
+            {request, Req.TransportError.exception(reason: :closed)}
+
+          :ok ->
+            {request,
+             Req.Response.new(
+               status: 200,
+               headers: [{"content-type", "application/json"}],
+               body: ~s({"models":[]})
+             )}
+        end
+      end
+
+      assert {:ok, client} = StubAdapter.client(stub)
+
+      assert {:error, %TypeSafe.Error{}} = TypeSafe.list_models(client)
+
+      assert_received {:sent, _request}
+      refute_received {:sent, _request}
+    end
+
+    # Gate 4 review, PR #1, a935ea1: B3 (JS client.ts:318) — an explicit nil
+    # model must fall back to client.default_model, same as an absent key.
+    test "B3: system_one treats an explicit nil model as absent" do
+      assert {:ok, client} =
+               StubAdapter.client(
+                 StubAdapter.respond(200, @system_one_response),
+                 default_model: "client-default"
+               )
+
+      assert {:ok, _result} =
+               TypeSafe.system_one(client, %{
+                 state: "s",
+                 questions: %{q1: TypeSafe.noul("?")},
+                 model: nil
+               })
+
+      assert_received {:sent, request}
+
+      assert {:ok, %{"model" => "client-default"}} =
+               JSON.decode(IO.iodata_to_binary(request.body))
+    end
+
+    # Gate 4 review, PR #1, a935ea1: B5 (spec §4 L113) — option VALUES, not
+    # only keys, must be guarded. Each of these raises today instead of
+    # returning {:error, _}.
+    test "B5: new/1 returns an error instead of raising for a wrong-typed option value" do
+      invalid_opts = [
+        [api_key: 123, get_env: fn _name -> nil end],
+        [api_key: "k", base_url: 123, get_env: fn _name -> nil end],
+        [api_key: "k", default_model: 42, get_env: fn _name -> nil end],
+        [api_key: "k", req_options: nil, get_env: fn _name -> nil end],
+        [api_key: "k", get_env: nil],
+        [api_key: "k", default_headers: nil, get_env: fn _name -> nil end]
+      ]
+
+      for opts <- invalid_opts do
+        assert {:error, %TypeSafe.Error{}} = TypeSafe.new(opts)
+      end
+    end
+
+    # Gate 4 review, PR #1, a935ea1: B5, log_level — spec §2 L37 pins the
+    # Elixir type as one of :debug/:info/:warning/:error/:off; nothing else
+    # (an unknown atom, a boolean, or a string) is a valid option value.
+    test "B5: new/1 returns an error instead of accepting an invalid log_level value" do
+      for log_level <- [:bogus, true, "debug"] do
+        assert {:error, %TypeSafe.Error{}} =
+                 TypeSafe.new(api_key: "k", log_level: log_level, get_env: fn _name -> nil end)
+      end
+    end
+
+    # Gate 4 review, PR #1, a935ea1: N2 — client.timeout must reach Req as
+    # receive_timeout; today it is computed but never applied to any request.
+    test "N2: the client's timeout is passed to Req as receive_timeout" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, ~s({"models":[]})))
+      assert client.timeout == 10_000
+
+      assert {:ok, []} = TypeSafe.list_models(client)
+      assert_received {:sent, request}
+      assert request.options[:receive_timeout] == 10_000
+    end
+
+    # Gate 4 review, PR #1, a935ea1: N4 — with_response must be value-checked
+    # before any request is sent, not after (a bad value today still burns a
+    # real request before crashing).
+    test "N4: with_response with a non-boolean value errors before any request is sent" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+      assert {:error, %TypeSafe.Error{}} =
+               TypeSafe.system_one(
+                 client,
+                 %{state: "s", questions: %{q1: TypeSafe.noul("?")}},
+                 with_response: "yes"
+               )
+
+      refute_received {:sent, _request}
+    end
+
+    # Gate 4 review, PR #1, a935ea1: N5 — a malformed request map must not
+    # crash with FunctionClauseError; it is a caller error, not a bug.
+    test "N5: a request map missing :state returns an error instead of raising" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+      assert {:error, %TypeSafe.Error{}} =
+               TypeSafe.system_one(client, %{questions: %{q1: TypeSafe.noul("?")}})
+
+      refute_received {:sent, _request}
+    end
+
+    test "N5: a string-keyed request map returns an error instead of raising" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+      assert {:error, %TypeSafe.Error{}} =
+               TypeSafe.system_one(client, %{
+                 "state" => "s",
+                 "questions" => %{"q1" => %{"type" => "noul"}}
+               })
+
+      refute_received {:sent, _request}
+    end
+
+    # Gate 4 review, PR #1, a935ea1: N7 (spec §12 q16, operator decision) — an
+    # explicit blank api_key must be rejected the same as a blank env value.
+    test "N7: new/1 treats an explicit blank api_key the same as a blank env value" do
+      for api_key <- ["", "   "] do
+        assert {:error, %TypeSafe.Error{message: message}} =
+                 TypeSafe.new(api_key: api_key, get_env: fn _name -> nil end)
+
+        assert message =~ "TYPESAFE_API_KEY"
+      end
+    end
+
+    # Gate 4 review, PR #1, a935ea1: N8 (spec §3 L62, JS client.ts:166-178) —
+    # a nil header value deletes the header; it must never be sent.
+    test "N8: a header with a nil value is not sent" do
+      assert {:ok, client} =
+               StubAdapter.client(
+                 StubAdapter.respond(200, ~s({"models":[]})),
+                 default_headers: %{"X-A" => nil}
+               )
+
+      assert {:ok, []} = TypeSafe.list_models(client)
+      assert_received {:sent, request}
+      assert Req.Request.get_header(request, "x-a") == []
+    end
+
+    # Gate 4 review, PR #1, a935ea1: N12 (spec §3 "the port therefore sets
+    # decode_body: false") — req_options must not be able to override the
+    # SDK's own JSON decoding; a caller's decode_body: true is overridden,
+    # not rejected, so the response still decodes correctly instead of
+    # crashing in TypeSafe's own decode_body/1.
+    test "N12: req_options cannot override decode_body; the response still decodes correctly" do
+      assert {:ok, client} =
+               StubAdapter.client(
+                 StubAdapter.respond(200, ~s({"models":[]})),
+                 req_options: [decode_body: true]
+               )
+
+      assert {:ok, []} = TypeSafe.list_models(client)
+    end
+  end
 end

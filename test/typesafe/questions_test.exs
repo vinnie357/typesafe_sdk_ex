@@ -224,4 +224,31 @@ defmodule TypeSafe.QuestionsTest do
 
     refute_received {:sent, _request}
   end
+
+  describe "review fixes" do
+    # Gate 4 review, PR #1, a935ea1: B4 (JS questions.ts:75) — a score
+    # question with no `criteria` key at all falls through both score
+    # clauses (which pattern-match the key) straight to the catch-all
+    # `:ok`, so it is sent today instead of rejected before any request.
+    test "B4: an atom-keyed score question missing criteria returns an error before sending" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+      assert {:error, %TypeSafe.Error{}} =
+               TypeSafe.system_one(client, %{state: "s", questions: %{q: %{type: "score"}}})
+
+      refute_received {:sent, _request}
+    end
+
+    test "B4: a string-keyed score question missing criteria returns an error before sending" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+      assert {:error, %TypeSafe.Error{}} =
+               TypeSafe.system_one(client, %{
+                 state: "s",
+                 questions: %{q: %{"type" => "score"}}
+               })
+
+      refute_received {:sent, _request}
+    end
+  end
 end
