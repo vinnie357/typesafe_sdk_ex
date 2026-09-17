@@ -27,7 +27,11 @@ run = "mix test --warnings-as-errors"
 description = "Scan repository history for secrets"
 run = "gitleaks detect --source . --no-banner"
 
+[tasks."hex-audit"]
+description = "Check for retired or security-advisory dependencies"
+run = "mix hex.audit"
+
 [tasks.ci]
 description = "Full local CI gate"
 depends = ["deps"]
-run = ["mix ci", "mise run gitleaks"]
+run = ["mix ci", "mise run hex-audit", "mise run gitleaks"]

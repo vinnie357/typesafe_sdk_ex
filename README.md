@@ -46,3 +46,5 @@ mise run ci
 
 `mise run ci` runs the full local quality gate: compile with warnings as
 errors, format check, `credo --strict`, the test suite, and a gitleaks scan.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution workflow.
