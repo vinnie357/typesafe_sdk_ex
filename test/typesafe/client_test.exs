@@ -435,36 +435,35 @@ defmodule TypeSafe.ClientTest do
       end
     end
 
-    # Gate 4 review, PR #1, 2467975 follow-up: B2 (spec §5 L154) — Req's
-    # built-in default retry (`:safe_transient`) must never be active on the
-    # client's request. The earlier "exactly once" call-count proof was a
-    # delayed fuse: it breaks the moment S3 legitimately retries a
+    # Gate 4 review, PR #1, 2467975 + 4159f27 follow-up: B2 (spec §5 L154) —
+    # Req's built-in default retry (`:safe_transient`) must never be active
+    # on the client's request. The original "exactly once" call-count proof
+    # was a delayed fuse: it broke the moment S3 legitimately retries a
     # retryable 503 (spec §5 L123/127/134 — default policy is max_retries 2,
-    # 503 retryable), and its `%TypeSafe.Error{}` struct pattern breaks the
+    # 503 retryable), and its `%TypeSafe.Error{}` struct pattern broke the
     # moment S2 lands the status-mapped error taxonomy (spec §6 — a 503
-    # becomes `TypeSafe.Error.InternalServer`, not `TypeSafe.Error`). This
-    # version asserts the durable invariant instead: `client.req.options[:retry]`
-    # is never Req's implicit default (`nil`, today's actual bug) or either
-    # named preset — it must be `false` (the interim S1 fix per spec §5 "pass
-    # retry: false in the base Req options until S3 swaps in decide/2") or,
-    # after S3, the `decide/2` function, neither of which is in this list.
-    # The response-side match is loose (`{:error, _}`) so it survives S2.
-    test "B2: the client req never carries Req's built-in default retry, and a 503 still errors" do
-      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(503, ~s({"models":[]})))
-
-      refute client.req.options[:retry] in [nil, :safe_transient, :transient]
-      assert {:error, _reason} = TypeSafe.list_models(client)
-    end
-
-    test "B2: the client req never carries Req's built-in default retry, and a transport error still errors" do
-      test_pid = self()
-
-      stub = fn request ->
-        send(test_pid, {:sent, request})
-        {request, Req.TransportError.exception(reason: :closed)}
-      end
-
-      assert {:ok, client} = StubAdapter.client(stub)
+    # becomes `TypeSafe.Error.InternalServer`, not `TypeSafe.Error`). The
+    # 503/transport-error stub pair also turned out to be its own fuse: once
+    # S3's real backoff is wired in, a stub that never stops erroring makes
+    # Req actually sleep through every retry (measured ~1.3s each), which
+    # both violates the no-sleep test rule and would push S3's own AC(4)
+    # (< 2s per test) over budget. This asserts only the durable, static
+    # invariant instead: `client.req.options[:retry]` is never Req's
+    # implicit default (`nil`, today's actual bug) or either named preset —
+    # it must be `false` (the interim S1 fix per spec §5 "pass retry: false
+    # in the base Req options until S3 swaps in decide/2") or, after S3, the
+    # `decide/2` function, neither of which is in this list. 400 is used for
+    # the response-side check because it is retryable under neither Req's
+    # `:safe_transient` preset (408/429/500/502/503/504 only) nor spec §5's
+    # own default `http_statuses` (408, 429, 500..599), so this assertion
+    # needs no retry loop — and no sleep — to observe. The response-side
+    # match is loose (`{:error, _}`) so it survives S2. The transport-error
+    # variant is dropped: unlike a fixed status, a stub that always answers
+    # with a transport error cannot dodge S3's real backoff, and the static
+    # invariant above already covers both failure kinds (it does not depend
+    # on what the stub returns).
+    test "B2: the client req never carries Req's built-in default retry" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(400, ~s({"models":[]})))
 
       refute client.req.options[:retry] in [nil, :safe_transient, :transient]
       assert {:error, _reason} = TypeSafe.list_models(client)
@@ -622,6 +621,7 @@ defmodule TypeSafe.ClientTest do
                  req_options: [decode_body: true]
                )
 
+      assert client.req.options[:decode_body] == false
       assert {:ok, []} = TypeSafe.list_models(client)
     end
   end
