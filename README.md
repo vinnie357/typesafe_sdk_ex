@@ -30,10 +30,72 @@ Question helpers `TypeSafe.noul/0,1,2`, `TypeSafe.choice/2`, and
 `TypeSafe.score/2` build the typed questions passed to `system_one/3`.
 `TypeSafe.list_models/2` lists available models.
 
-Retries, timeouts, the full HTTP error taxonomy, and logging are still in
-progress (tracked as later slices of the Elixir port) — `system_one/3` and
-`list_models/2` currently treat any non-2xx response as a generic
-`TypeSafe.Error`.
+## Errors
+
+A non-2xx HTTP response from `system_one/3` or `list_models/2` returns a
+status-mapped error struct under `TypeSafe.Error.*`:
+
+- `TypeSafe.Error.BadRequest` (400)
+- `TypeSafe.Error.Authentication` (401)
+- `TypeSafe.Error.PermissionDenied` (403)
+- `TypeSafe.Error.NotFound` (404)
+- `TypeSafe.Error.UnprocessableEntity` (422)
+- `TypeSafe.Error.RateLimit` (429, carries `retry_after_ms`)
+- `TypeSafe.Error.InternalServer` (5xx, including 529)
+- `TypeSafe.Error.API` (any other non-2xx status, e.g. 409 or 418)
+- `TypeSafe.Error.Connection` (a transport failure — closed socket, DNS, TLS)
+- `TypeSafe.Error.Timeout` (the configured timeout was exceeded)
+
+The generic `TypeSafe.Error` still covers everything that isn't a mapped
+HTTP failure: client-config problems from `new/1`, question-validation
+failures from `system_one/3`, and an unexpected `/v1/models` response
+shape.
+
+There is **no shared base struct** — the ten `TypeSafe.Error.*` structs and
+the generic `TypeSafe.Error` are unrelated exceptions. Match on `{:error,
+exception}` for a catch-all clause; `Exception.message/1` works on all of
+them:
+
+```elixir
+case TypeSafe.system_one(client, request) do
+  {:ok, result} ->
+    result
+
+  {:error, %TypeSafe.Error.Authentication{} = error} ->
+    {:error, "auth failed: " <> Exception.message(error)}
+
+  {:error, %TypeSafe.Error.RateLimit{retry_after_ms: ms} = error} ->
+    {:error, "rate limited (retry after #{ms}ms): " <> Exception.message(error)}
+
+  {:error, exception} ->
+    {:error, Exception.message(exception)}
+end
+```
+
+### Known limitations
+
+- **No retries.** A 429 or 503 response returns immediately; the caller is
+  responsible for any retry loop. `Retry-After` is exposed only as
+  `TypeSafe.Error.RateLimit.retry_after_ms`, and only when the header is an
+  integer-seconds value — decimals, `retry-after-ms`, and HTTP-date values
+  are not parsed.
+- **No per-call timeout option.** Every request uses the client's
+  configured timeout; there is no per-call override.
+- **No logging.**
+- **No telemetry.**
+
+## Installation
+
+This package is not on Hex — the name `typesafe_sdk` there belongs to a
+different project. Install it as a git dependency:
+
+```elixir
+def deps do
+  [
+    {:typesafe_sdk_ex, github: "vinnie357/typesafe_sdk_ex"}
+  ]
+end
+```
 
 ## Development
 

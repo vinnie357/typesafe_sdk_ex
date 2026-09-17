@@ -44,7 +44,7 @@ defmodule TypeSafe.RetryPolicy do
         {"backoff_initial_ms", Kernel.inspect(policy.backoff_initial_ms)},
         {"backoff_max_ms", Kernel.inspect(policy.backoff_max_ms)},
         {"backoff_jitter", Kernel.inspect(policy.backoff_jitter)},
-        {"http_statuses", summarize_statuses(policy.http_statuses)},
+        {"http_statuses", "[" <> summarize_statuses(policy.http_statuses) <> "]"},
         {"respect_retry_after", Kernel.inspect(policy.respect_retry_after)},
         {"max_retry_after_ms", Kernel.inspect(policy.max_retry_after_ms)},
         {"api_connection_error", Kernel.inspect(policy.api_connection_error)},

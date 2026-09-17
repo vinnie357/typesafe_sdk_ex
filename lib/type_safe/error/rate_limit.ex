@@ -1,6 +1,6 @@
 defmodule TypeSafe.Error.RateLimit do
   @moduledoc """
-  HTTP 429: the rate limit was exceeded (spec `docs/spec.md` §6).
+  HTTP 429: the rate limit was exceeded.
 
   Carries the same field contract as every mapped HTTP error (`status`,
   `body`, `headers`, `request_id`, `message`), plus `retry_after_ms` — the

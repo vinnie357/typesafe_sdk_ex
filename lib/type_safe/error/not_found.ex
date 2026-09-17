@@ -1,6 +1,6 @@
 defmodule TypeSafe.Error.NotFound do
   @moduledoc """
-  HTTP 404: the resource was not found (spec `docs/spec.md` §6).
+  HTTP 404: the resource was not found.
 
   Carries the same field contract as every mapped HTTP error: `status`,
   `body` (decoded JSON, text, or `nil`), `headers` (a Req header map),

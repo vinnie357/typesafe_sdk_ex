@@ -1,7 +1,7 @@
 defmodule TypeSafe.Error.InternalServer do
   @moduledoc """
   An HTTP 5xx response (including 529 Overloaded): the server failed to
-  handle the request (spec `docs/spec.md` §6).
+  handle the request.
 
   Carries the same field contract as every mapped HTTP error: `status`,
   `body` (decoded JSON, text, or `nil`), `headers` (a Req header map),

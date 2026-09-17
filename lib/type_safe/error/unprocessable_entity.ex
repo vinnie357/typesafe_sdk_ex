@@ -1,6 +1,6 @@
 defmodule TypeSafe.Error.UnprocessableEntity do
   @moduledoc """
-  HTTP 422: request validation failed (spec `docs/spec.md` §6).
+  HTTP 422: request validation failed.
 
   Carries the same field contract as every mapped HTTP error: `status`,
   `body` (decoded JSON, text, or `nil`), `headers` (a Req header map),

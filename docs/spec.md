@@ -1,5 +1,8 @@
 # TypeSafe SDK — Elixir port spec (P1)
 
+> Internal design and port-tracking notes for this package's development.
+> Not user documentation — see [`README.md`](../README.md) for usage.
+
 Source: `typesafe-ai/typesafe-sdk-js` @ `66880ccded6cb642dc1809620c2b108c33730214`, version `0.6.0` (`src/version.ts:2`).
 Citation forms:
 - `path:line` is a line in that JS repo.

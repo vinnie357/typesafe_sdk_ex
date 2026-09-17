@@ -1,6 +1,6 @@
 defmodule TypeSafe.Error.BadRequest do
   @moduledoc """
-  HTTP 400: the request was invalid (spec `docs/spec.md` §6).
+  HTTP 400: the request was invalid.
 
   Carries the same field contract as every mapped HTTP error: `status`,
   `body` (decoded JSON, text, or `nil`), `headers` (a Req header map),

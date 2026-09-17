@@ -1,6 +1,6 @@
 defmodule TypeSafe.Error.PermissionDenied do
   @moduledoc """
-  HTTP 403: access was denied (spec `docs/spec.md` §6).
+  HTTP 403: access was denied.
 
   Carries the same field contract as every mapped HTTP error: `status`,
   `body` (decoded JSON, text, or `nil`), `headers` (a Req header map),
