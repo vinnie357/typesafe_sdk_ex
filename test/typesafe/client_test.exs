@@ -624,5 +624,257 @@ defmodule TypeSafe.ClientTest do
       assert client.req.options[:decode_body] == false
       assert {:ok, []} = TypeSafe.list_models(client)
     end
+
+    # Gate 4 review round 2 (approved a0e66bf, non-blocking): R1 — an
+    # explicit nil option must fall back to env then default, matching JS
+    # `fromCode ?? readEnv` (env.ts:22-23). Today `Config.validate_type`
+    # calls `Keyword.fetch/2`, which finds the key present (even though its
+    # value is nil) and runs the type guard on it directly, so nil is
+    # treated as "given but wrong type" instead of "not given" — the
+    # `nil ->` fallback clauses in resolve_api_key/resolve_string/
+    # resolve_log_level are dead code today. This does not touch the B5
+    # type guards: a genuinely wrong-typed value (`base_url: 123`) still
+    # errors via the existing B5 test below, unaffected by this fix.
+    test "R1: an explicit nil api_key falls back to env, then to the missing-key error" do
+      env = %{"TYPESAFE_API_KEY" => "env-key"}
+
+      assert {:ok, client} =
+               StubAdapter.client(
+                 StubAdapter.respond(200, ~s({"models":[]})),
+                 api_key: nil,
+                 get_env: fn name -> Map.get(env, name) end
+               )
+
+      assert {:ok, []} = TypeSafe.list_models(client)
+      assert_received {:sent, request}
+      assert Req.Request.get_header(request, "authorization") == ["Bearer env-key"]
+
+      assert {:error, %TypeSafe.Error{message: message}} =
+               TypeSafe.new(api_key: nil, get_env: fn _name -> nil end)
+
+      assert message =~ "TYPESAFE_API_KEY"
+    end
+
+    test "R1: an explicit nil base_url falls back to env, then to the default" do
+      env = %{"TYPESAFE_BASE_URL" => "https://env.test"}
+
+      assert {:ok, client} =
+               TypeSafe.new(
+                 api_key: "k",
+                 base_url: nil,
+                 get_env: fn name -> Map.get(env, name) end
+               )
+
+      assert client.base_url == "https://env.test"
+
+      assert {:ok, client} =
+               TypeSafe.new(api_key: "k", base_url: nil, get_env: fn _name -> nil end)
+
+      assert client.base_url == "https://api.typesafe.ai"
+    end
+
+    test "R1: an explicit nil default_model falls back to env, then to the default" do
+      env = %{"TYPESAFE_DEFAULT_MODEL" => "env-model"}
+
+      assert {:ok, client} =
+               TypeSafe.new(
+                 api_key: "k",
+                 default_model: nil,
+                 get_env: fn name -> Map.get(env, name) end
+               )
+
+      assert client.default_model == "env-model"
+
+      assert {:ok, client} =
+               TypeSafe.new(api_key: "k", default_model: nil, get_env: fn _name -> nil end)
+
+      assert client.default_model == "jev-latest"
+    end
+
+    test "R1: an explicit nil log_level falls back to env, then to the default" do
+      env = %{"TYPESAFE_LOG_LEVEL" => "debug"}
+
+      assert {:ok, client} =
+               TypeSafe.new(
+                 api_key: "k",
+                 log_level: nil,
+                 get_env: fn name -> Map.get(env, name) end
+               )
+
+      assert client.log_level == :debug
+
+      assert {:ok, client} =
+               TypeSafe.new(api_key: "k", log_level: nil, get_env: fn _name -> nil end)
+
+      assert client.log_level == :warning
+    end
+
+    # Gate 4 review round 2: R2 — req_options must not override SDK-owned
+    # request settings. verified: today Keyword.merge/2 puts req_options
+    # AFTER the base [base_url: base_url], so req_options wins for base_url;
+    # client.base_url (the struct field) is computed from the ORIGINAL
+    # base_url and does not agree with where the request actually goes.
+    test "R2: req_options cannot override the client's base_url" do
+      assert {:ok, client} =
+               StubAdapter.client(
+                 StubAdapter.respond(200, ~s({"models":[]})),
+                 base_url: "https://x.test",
+                 req_options: [base_url: "https://evil.test"]
+               )
+
+      assert client.base_url == "https://x.test"
+
+      assert {:ok, []} = TypeSafe.list_models(client)
+      assert_received {:sent, request}
+      assert request.url.host == "x.test"
+    end
+
+    # R2, the auth sibling — verified: Req's built-in :auth request step
+    # runs before the (stub) adapter, so a req_options auth: {:bearer, ...}
+    # overwrites the authorization header we set at client-build time by
+    # the time our own protected-header guarantees ever see the request.
+    test "R2: req_options cannot override the configured Authorization header" do
+      assert {:ok, client} =
+               StubAdapter.client(
+                 StubAdapter.respond(200, ~s({"models":[]})),
+                 api_key: "secret",
+                 req_options: [auth: {:bearer, "other"}]
+               )
+
+      assert {:ok, []} = TypeSafe.list_models(client)
+      assert_received {:sent, request}
+      assert Req.Request.get_header(request, "authorization") == ["Bearer secret"]
+    end
+
+    # R2, the timeout sibling — operator decision (recorded in docs/spec.md
+    # §3): receive_timeout has its own future `:timeout` option (S3), so a
+    # caller trying to set it via req_options is REJECTED at new/1 rather
+    # than silently accepted-then-ignored. verified: today new/1 returns
+    # {:ok, client} and client.req.options[:receive_timeout] == 1 — accepted,
+    # even though the actual per-call receive_timeout: client.timeout always
+    # wins at request time, so the value is dead weight at best.
+    test "R2: req_options with receive_timeout is rejected, naming the option" do
+      assert {:error, %TypeSafe.Error{message: message}} =
+               TypeSafe.new(
+                 api_key: "k",
+                 req_options: [receive_timeout: 1],
+                 get_env: fn _name -> nil end
+               )
+
+      assert message =~ "receive_timeout"
+    end
+
+    # Gate 4 review round 2: R3 — header containers/values are not
+    # validated, unlike with_response. verified today: `default_headers: %{
+    # "x" => %{a: 1}}` passes new/1 (is_map check only looks at the whole
+    # map, not its values) and would raise on the first request; per-call
+    # `headers: nil` and `headers: "x"` raise Protocol.UndefinedError
+    # (Enumerable) inside build_request, before any HTTP call; a map header
+    # value raises Protocol.UndefinedError (String.Chars); a list header
+    # value is silently chardata-concatenated instead of rejected.
+    test "R3: new/1 errors on a default_headers value that is not a valid header value" do
+      assert {:error, %TypeSafe.Error{}} =
+               TypeSafe.new(
+                 api_key: "k",
+                 default_headers: %{"x" => %{a: 1}},
+                 get_env: fn _name -> nil end
+               )
+    end
+
+    test "R3: a malformed per-call headers option errors before any request is sent" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+      bad_headers = [nil, "x", %{"x" => %{a: 1}}, %{"x" => ["a", "b"]}]
+
+      for headers <- bad_headers do
+        assert {:error, %TypeSafe.Error{}} =
+                 TypeSafe.system_one(
+                   client,
+                   %{state: "s", questions: %{q1: TypeSafe.noul("?")}},
+                   headers: headers
+                 )
+      end
+
+      refute_received {:sent, _request}
+    end
+
+    # Gate 4 review round 2: R4 — new/1's doc claims it "never raises on bad
+    # input"; these three inputs still do (verified: FunctionClauseError in
+    # Keyword.validate/2 for the first two, in Config.blank_to_nil/1 for the
+    # third, since a working 1-arity get_env with a non-binary return value
+    # passes the is_function(&1, 1) guard and only crashes once called).
+    test "R4: new/1 returns an error instead of raising for non-keyword-list input" do
+      assert {:error, %TypeSafe.Error{}} = TypeSafe.new(%{api_key: "k"})
+      assert {:error, %TypeSafe.Error{}} = TypeSafe.new("k")
+    end
+
+    test "R4: new/1 returns an error instead of raising for a non-binary env value" do
+      assert {:error, %TypeSafe.Error{}} =
+               TypeSafe.new(api_key: "k", get_env: fn _name -> 123 end)
+    end
+
+    # Gate 4 review round 2: R5 — the fallback system_one/3 error names
+    # `:state` as the required key even when :state is present and
+    # :questions is the actual problem. verified: today's message is the
+    # same static string for both cases below, literally containing the
+    # substring "with a :state key" regardless of which key is wrong.
+    test "R5: a request with :state but missing/invalid :questions names questions, not :state, as the problem" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+      cases = [%{state: "s"}, %{state: "s", questions: [q: "bad"]}]
+
+      for request <- cases do
+        assert {:error, %TypeSafe.Error{message: message}} =
+                 TypeSafe.system_one(client, request)
+
+        refute message =~ "with a :state key"
+        assert message =~ "questions"
+      end
+    end
+
+    # R6 (Gate 4 review round 2) is already resolved as of 14d73d1: Config,
+    # HTTP, and Questions all carry `@moduledoc false`, and no review/spec
+    # citation (`Gate 4`, `N10`, `q12`, `q16`) remains in any public @doc or
+    # @moduledoc text (grepped). This is a cheap verification, not a red
+    # pin — it passes today and guards the fix against a future regression,
+    # per the operator's explicit exception for this one finding.
+    test "R6: internal modules are hidden from generated docs" do
+      for mod <- [TypeSafe.Config, TypeSafe.HTTP, TypeSafe.Questions] do
+        assert {:docs_v1, _anno, _lang, _format, :hidden, _meta, _docs} = Code.fetch_docs(mod)
+      end
+    end
+
+    # Operator request (new, not a lettered finding): inspect/1 on a
+    # %TypeSafe.RetryPolicy{} must not dump the ~100-element http_statuses
+    # MapSet as raw, hash-ordered numbers. Pinned rendering (recorded in
+    # docs/spec.md §4): a custom Inspect implementation renders
+    # http_statuses as a compact summary containing "408", "429", and
+    # "500..599" — the intended reading is that the default set is exactly
+    # {408, 429} ∪ 500..599, and nothing else. verified today: the derived
+    # struct inspect is 620 characters and enumerates individual members in
+    # hash order (e.g. "545, 533, 597, 500, ...") with no range notation.
+    test "inspect(%TypeSafe.RetryPolicy{}) renders http_statuses compactly, not as a number dump" do
+      rendered = inspect(%TypeSafe.RetryPolicy{})
+
+      assert String.length(rendered) < 200
+      assert rendered =~ "408"
+      assert rendered =~ "429"
+      assert rendered =~ "500..599"
+    end
+
+    # Same fix, checked through the client: RetryPolicy is a nested field
+    # of TypeSafe.Client, so a correct Inspect implementation renders
+    # compactly there too. "545" is one of the hash-ordered individual
+    # members visible in today's raw dump (verified above); its absence
+    # here distinguishes a real fix from one that only patches the
+    # standalone %TypeSafe.RetryPolicy{} case.
+    test "inspect(client) also stays free of the http_statuses number dump" do
+      assert {:ok, client} = TypeSafe.new(api_key: "k", get_env: fn _name -> nil end)
+
+      rendered = inspect(client)
+
+      refute rendered =~ "545"
+      assert rendered =~ "500..599"
+    end
   end
 end
