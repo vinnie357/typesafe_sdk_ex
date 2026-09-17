@@ -1,8 +1,8 @@
 defmodule TypeSafe.RetryPolicy do
   @moduledoc """
-  Retry policy defaults for the TypeSafe client (spec `docs/spec.md` §5). Retry
-  execution (backoff, jitter, Req wiring) is implemented in a later slice; this
-  struct only carries the default values every client is built with.
+  Retry policy defaults for the TypeSafe client. Retry execution (backoff,
+  jitter, Req wiring) is implemented in a later slice; this struct only
+  carries the default values every client is built with.
   """
 
   @type t :: %__MODULE__{

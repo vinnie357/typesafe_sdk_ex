@@ -8,13 +8,11 @@ defmodule TypeSafe do
 
   Build questions with `noul/0`, `noul/1`, `noul/2`, `choice/2`, and `score/2`.
 
-  This module is a thin public facade: option/env resolution and validation
-  live in `TypeSafe.Config`, Req construction and HTTP mechanics in
-  `TypeSafe.HTTP`, and question builders and pre-send validation in
-  `TypeSafe.Questions` (spec `docs/spec.md`, Gate 4 review N10).
+  This module is a thin public facade over internal modules that handle
+  option/env resolution, Req/HTTP mechanics, and question building.
   """
 
-  @typedoc "Log level accepted by `new/1`'s `:log_level` option (spec §7)."
+  @typedoc "Log level accepted by `new/1`'s `:log_level` option."
   @type log_level :: :debug | :info | :warning | :error | :off
 
   @typedoc "A `system_one/3` request: `state`, `questions`, and any extra top-level keys."
@@ -58,13 +56,13 @@ defmodule TypeSafe do
   end
 
   @doc """
-  Builds a `TypeSafe.Client` (spec §4).
+  Builds a `TypeSafe.Client`.
 
   Resolves `:api_key`, `:base_url`, `:default_model`, and `:log_level` in this
   order: the option, then the matching `TYPESAFE_*` environment variable (read
   through `:get_env`, which defaults to `&System.get_env/1`), then a default.
   A blank (empty or whitespace-only) option or environment value counts as
-  unset for `:api_key` (spec §12 q16).
+  unset for `:api_key`.
 
   Options:
   - `:api_key` — required unless `TYPESAFE_API_KEY` is set. Must be a string.
@@ -74,8 +72,8 @@ defmodule TypeSafe do
   - `:log_level` — one of `t:log_level/0`, default `:warning`.
   - `:default_headers` — a map merged onto every request, default `%{}`.
   - `:req_options` — a keyword list merged into `Req.new/1` (e.g. `adapter:` for tests).
-    `decode_body` and `retry` are SDK-owned (spec §3, §5) and are always forced to
-    `false` regardless of what `req_options` requests.
+    `decode_body` and `retry` are SDK-owned and are always forced to `false`
+    regardless of what `req_options` requests.
   - `:get_env` — a `(String.t() -> String.t() | nil)` function, default `&System.get_env/1`.
 
   Every option value above is checked with a guard clause. A wrong-typed value
@@ -88,7 +86,7 @@ defmodule TypeSafe do
   defdelegate new(opts \\ []), to: TypeSafe.Config, as: :build
 
   @doc """
-  Lists available models via `GET /v1/models` (spec §3).
+  Lists available models via `GET /v1/models`.
 
   Options:
   - `:headers` — a map merged onto this call's request; cannot override protected headers.
@@ -106,17 +104,17 @@ defmodule TypeSafe do
   defdelegate list_models(client, opts \\ []), to: TypeSafe.HTTP
 
   @doc """
-  Asks typed questions about `state` via `POST /v1/systemone` (spec §3, §8).
+  Asks typed questions about `state` via `POST /v1/systemone`.
 
   `request` is `%{state: term(), questions: %{id => question}, ...extra}` — an
-  atom-keyed map with a `:state` key (spec §8 "Request shape contract"). A
-  request missing `:state`, or a string-keyed request map, returns
-  `{:error, %TypeSafe.Error{}}` with zero HTTP calls rather than raising. The
-  request's own `:model` wins when present and non-`nil`; `nil` and absent are
-  treated the same and fall back to `client.default_model`. Any other
-  top-level keys (including `nil` values) are forwarded as-is.
+  atom-keyed map with a `:state` key. A request missing `:state`, or a
+  string-keyed request map, returns `{:error, %TypeSafe.Error{}}` with zero
+  HTTP calls rather than raising. The request's own `:model` wins when present
+  and non-`nil`; `nil` and absent are treated the same and fall back to
+  `client.default_model`. Any other top-level keys (including `nil` values)
+  are forwarded as-is.
 
-  Every question is validated before any request is sent (spec §8): an empty
+  Every question is validated before any request is sent: an empty
   `questions` map, a `score` question whose criteria is not a list (or has no
   `criteria` key at all, atom- or string-keyed), or a `score` question with
   fewer than two criteria all return `{:error, %TypeSafe.Error{}}` with zero
@@ -135,7 +133,7 @@ defmodule TypeSafe do
   defdelegate system_one(client, request, opts \\ []), to: TypeSafe.HTTP
 
   @doc """
-  Builds a `noul` question with no instructions and no criteria (spec §8).
+  Builds a `noul` question with no instructions and no criteria.
 
   ## Examples
 
@@ -146,12 +144,12 @@ defmodule TypeSafe do
   @spec noul() :: question()
   defdelegate noul(), to: TypeSafe.Questions
 
-  @doc "Builds a `noul` question with `instructions` and no criteria key (spec §8)."
+  @doc "Builds a `noul` question with `instructions` and no criteria key."
   @spec noul(term()) :: question()
   defdelegate noul(instructions), to: TypeSafe.Questions
 
   @doc """
-  Builds a `noul` question with `instructions` and `criteria` (spec §8). `criteria`
+  Builds a `noul` question with `instructions` and `criteria`. `criteria`
   may be `nil`, or a map with a `true` key, a `false` key, or both.
   """
   @spec noul(term(), map() | nil) :: question()
@@ -159,7 +157,7 @@ defmodule TypeSafe do
 
   @doc """
   Builds a `choice` question. `criteria` must be a map (a list raises
-  `FunctionClauseError`, matching the JS SDK's runtime throw, spec §8).
+  `FunctionClauseError`, matching the JS SDK's runtime throw).
   """
   @spec choice(term(), map()) :: question()
   defdelegate choice(instructions, criteria), to: TypeSafe.Questions
@@ -167,7 +165,7 @@ defmodule TypeSafe do
   @doc """
   Builds a `score` question. `criteria` must be a list, indexed by score from
   zero (a map raises `FunctionClauseError`, matching the JS SDK's runtime
-  throw, spec §8).
+  throw).
   """
   @spec score(term(), list()) :: question()
   defdelegate score(instructions, criteria), to: TypeSafe.Questions

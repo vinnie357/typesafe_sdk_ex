@@ -1,9 +1,9 @@
 defmodule TypeSafe.HTTP do
-  @moduledoc """
-  Req request construction, protected headers, and response handling (spec
-  `docs/spec.md` §3, §9a). `TypeSafe.list_models/2` and `TypeSafe.system_one/3`
-  delegate here; see their `@doc` for the full contract.
-  """
+  # Req request construction, protected headers, and response handling.
+  # `TypeSafe.list_models/2` and `TypeSafe.system_one/3` delegate here; see
+  # their `@doc` for the full contract. Internal implementation detail behind
+  # the `TypeSafe` facade.
+  @moduledoc false
 
   @doc """
   Builds the base `Req.Request` for a client: `base_url` plus `req_options`
@@ -69,7 +69,9 @@ defmodule TypeSafe.HTTP do
   def system_one(%TypeSafe.Client{}, request, _opts) when is_map(request) do
     {:error,
      %TypeSafe.Error{
-       message: "system_one/3 request must be an atom-keyed map with a :state key (spec §8)."
+       message:
+         "system_one/3 request must be an atom-keyed map with a :state key, e.g. " <>
+           "%{state: ..., questions: ...}."
      }}
   end
 

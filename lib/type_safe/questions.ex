@@ -1,9 +1,9 @@
 defmodule TypeSafe.Questions do
-  @moduledoc """
-  Question builders and pre-send validation (spec `docs/spec.md` §8).
-  `TypeSafe.noul/0,1,2`, `TypeSafe.choice/2`, and `TypeSafe.score/2` delegate
-  here; see their `@doc` for the full contract.
-  """
+  # Question builders and pre-send validation. `TypeSafe.noul/0,1,2`,
+  # `TypeSafe.choice/2`, and `TypeSafe.score/2` delegate here; see their
+  # `@doc` for the full contract. Internal implementation detail behind the
+  # `TypeSafe` facade.
+  @moduledoc false
 
   @doc "Builds a `noul` question with no instructions and no criteria."
   @spec noul() :: TypeSafe.question()

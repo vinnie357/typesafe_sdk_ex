@@ -1,7 +1,7 @@
 defmodule TypeSafe.Client do
   @moduledoc """
-  Configured TypeSafe API client (spec `docs/spec.md` §2, §4). The API key lives
-  only as the `authorization` header on `req` — never as a plain struct field.
+  Configured TypeSafe API client. The API key lives only as the
+  `authorization` header on `req` — never as a plain struct field.
 
   **Default `inspect/2` never prints the key**, because Req's `Inspect`
   implementation for `Req.Request` redacts the `authorization` header value.

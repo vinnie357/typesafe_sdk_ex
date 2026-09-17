@@ -1,9 +1,8 @@
 defmodule TypeSafe.Config do
-  @moduledoc """
-  Client option and environment-variable resolution and validation (spec
-  `docs/spec.md` §4). `TypeSafe.new/1` delegates here; see its `@doc` for the
-  full option reference.
-  """
+  # Client option and environment-variable resolution and validation.
+  # `TypeSafe.new/1` delegates here; see its `@doc` for the full option
+  # reference. Internal implementation detail behind the `TypeSafe` facade.
+  @moduledoc false
 
   @valid_keys [
     :api_key,
