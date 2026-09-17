@@ -20,8 +20,14 @@ erl_crash.dump
 *.ez
 
 # Ignore package tarball (built via "mix hex.build").
-typesafe_sdk-*.tar
+typesafe_sdk_ex-*.tar
 
 # Editor/tooling artifacts
 .elixir_ls/
+
+# Compiled bytecode from a stray elixirc run
+*.beam
+
+# Local secrets layered onto runtime config
+/config/*.secret.exs
 

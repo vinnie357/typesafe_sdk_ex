@@ -38,7 +38,7 @@ Every export of `src/index.ts:1-22`:
 | `choice`, `noul`, `score` (`index.ts:19`) | `TypeSafe.choice/2`, `TypeSafe.noul/0,1,2`, `TypeSafe.score/2` (§8) |
 | `Models` type (`index.ts:20`) | none |
 | `export type * from "./types"` (`index.ts:21`, `types.ts`) | `@type`s only: `request`, `question`, `system_one_result`, `model_card`. No structs for responses (§8). |
-| `VERSION` (`index.ts:22`) | `TypeSafe.version/0` → `Application.spec(:typesafe_sdk, :vsn)` |
+| `VERSION` (`index.ts:22`) | `TypeSafe.version/0` → `Application.spec(:typesafe_sdk_ex, :vsn)` |
 | `RetryPolicy` type (`types.ts:175-194`) | `%TypeSafe.RetryPolicy{}` struct with the §5 defaults. Overrides are keyword lists: `retry: [max_retries: 0]`. |
 
 Client struct fields map to the readonly JS properties (`client.ts:236-255`): `base_url`, `default_model`, `log_level`, `retry`, `timeout`, `default_headers`, `req` (the configured `Req.Request`). The API key lives only inside `req`, as the bearer auth header. Req's `Inspect` for `Req.Request` redacts the `authorization` value (`req@0.7.4 lib/req/request.ex:1157-1165`), which covers `client.test.ts:82-87`.
@@ -297,7 +297,7 @@ Runtime dependency: `req` only.
 | Timeouts | Req `:receive_timeout`. `:pool_timeout` is not set at top level (deprecated, `req.ex:550-552`). | §5 |
 | Request log tag | `System.unique_integer([:positive, :monotonic])` | §7 |
 | Runtime header | `System.version/0`, `:erlang.system_info(:otp_release)` | §12 q14 |
-| Version | `Application.spec(:typesafe_sdk, :vsn)` | §2 |
+| Version | `Application.spec(:typesafe_sdk_ex, :vsn)` | §2 |
 | Test HTTP stubs | Req module adapter plus closure in `request.private`; state via `send/2` or `Agent` | §11; verified |
 
 **JS features whose obvious port would add a dependency:**

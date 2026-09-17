@@ -51,7 +51,7 @@ defmodule TypeSafe do
   """
   @spec version() :: String.t()
   def version do
-    case Application.spec(:typesafe_sdk, :vsn) do
+    case Application.spec(:typesafe_sdk_ex, :vsn) do
       nil -> @version
       vsn -> to_string(vsn)
     end

@@ -6,7 +6,7 @@ defmodule TypeSafe.MixProject do
 
   def project do
     [
-      app: :typesafe_sdk,
+      app: :typesafe_sdk_ex,
       version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
