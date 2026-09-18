@@ -218,6 +218,8 @@ defmodule TypeSafe.HTTP do
     end
   end
 
+  def decode_body(%Req.Response{body: body}), do: body
+
   defp finalize(data, _response, false), do: data
 
   defp finalize(data, response, true) do
