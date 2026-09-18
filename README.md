@@ -65,7 +65,8 @@ case TypeSafe.system_one(client, request) do
     {:error, "auth failed: " <> Exception.message(error)}
 
   {:error, %TypeSafe.Error.RateLimit{retry_after_ms: ms} = error} ->
-    {:error, "rate limited (retry after #{ms}ms): " <> Exception.message(error)}
+    retry = if ms, do: " (retry after #{ms}ms)", else: ""
+    {:error, "rate limited#{retry}: " <> Exception.message(error)}
 
   {:error, exception} ->
     {:error, Exception.message(exception)}
@@ -79,8 +80,8 @@ end
   `TypeSafe.Error.RateLimit.retry_after_ms`, and only when the header is an
   integer-seconds value — decimals, `retry-after-ms`, and HTTP-date values
   are not parsed.
-- **No per-call timeout option.** Every request uses the client's
-  configured timeout; there is no per-call override.
+- **Fixed timeout.** Every request uses a fixed 10-second timeout; there is no
+  client-level or per-call timeout option yet.
 - **No logging.**
 - **No telemetry.**
 
@@ -107,6 +108,7 @@ mise run ci
 ```
 
 `mise run ci` runs the full local quality gate: compile with warnings as
-errors, format check, `credo --strict`, the test suite, and a gitleaks scan.
+errors, format check, `credo --strict`, the test suite, `mix hex.audit`,
+and a gitleaks scan.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution workflow.
