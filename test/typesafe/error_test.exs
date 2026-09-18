@@ -266,4 +266,15 @@ defmodule TypeSafe.ErrorTest do
 
     assert result["model"] == "jev-1.13.0"
   end
+
+  # Gate 4 review round 3, D3: an already-decoded error body from a custom adapter
+  # is passed through to the error struct and does not raise FunctionClauseError.
+  test "D3: an error response body that is already decoded is passed through to the error struct" do
+    assert {:ok, client} = error_client(500, %{"error" => "boom"})
+
+    assert {:error, %TypeSafe.Error.InternalServer{} = error} = TypeSafe.list_models(client)
+    assert error.status == 500
+    assert error.body == %{"error" => "boom"}
+    assert error.message == "500 boom"
+  end
 end

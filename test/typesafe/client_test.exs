@@ -881,5 +881,23 @@ defmodule TypeSafe.ClientTest do
       refute rendered =~ "545"
       assert rendered =~ "500..599"
     end
+
+    # Gate 4 review round 3, D3 (non-blocking): TypeSafe.HTTP.decode_body/1
+    # has no clause for a body that isn't nil/""/binary, so it raises
+    # FunctionClauseError. Unreachable through Req's own pipeline — the SDK
+    # forces decode_body: false, so Req itself never hands back a decoded
+    # term — but directly reachable when a caller injects a custom adapter
+    # via req_options: [adapter: ...] that returns an already-decoded body,
+    # exactly what a consumer integrating against our stub-style adapter
+    # will do. Per docs/spec.md §3 ("decode_body is SDK-owned"): the
+    # already-decoded term is exactly what decode_body/1 would otherwise
+    # have produced from JSON text, so it is passed through unchanged, not
+    # re-encoded or rejected.
+    test "D3: a response body that is already decoded is passed through, not re-decoded" do
+      assert {:ok, client} =
+               StubAdapter.client(StubAdapter.respond(200, %{"models" => []}))
+
+      assert {:ok, []} = TypeSafe.list_models(client)
+    end
   end
 end
