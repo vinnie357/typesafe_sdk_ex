@@ -84,7 +84,7 @@ Header precedence: `default_headers` < per-call `headers` < protected SDK header
 
 Req's default decoder picks a format by content-type (`req@0.7.4 lib/req/steps.ex:1160-1175`), so it cannot parse JSON sent without one. The port therefore sets `decode_body: false` and calls Elixir's built-in `JSON.decode/1`. verified: it returns `{:ok, %{"a" => 1}}` for JSON and `{:error, {:invalid_byte, 0, 60}}` for HTML. Request bodies are encoded with Req's `:json` option, which also sets `content-type` and `accept` (`steps.ex:489-492`).
 
-**`decode_body` is SDK-owned (Gate 4 review N12).** `req_options` (§4) is a caller-supplied keyword list merged into `Req.new/1`, but `decode_body: false` above is a hard SDK requirement, not a mere default: the port's own JSON decoding depends on it. A caller-supplied `req_options: [decode_body: ...]` is therefore **overridden**, not rejected — `new/1` still returns `{:ok, client}`, and the client's `decode_body` stays `false` regardless of what `req_options` requested.
+**`decode_body` is SDK-owned (Gate 4 review N12, D3).** `req_options` (§4) is a caller-supplied keyword list merged into `Req.new/1`, but `decode_body: false` above is a hard SDK requirement, not a mere default: the port's own JSON decoding depends on it. A caller-supplied `req_options: [decode_body: ...]` is therefore **overridden**, not rejected — `new/1` still returns `{:ok, client}`, and the client's `decode_body` stays `false` regardless of what `req_options` requested. If a caller injects a custom adapter via `req_options: [adapter: ...]` that returns an already-decoded body (e.g. a decoded map from a test stub), `decode_body/1` passes that term through unchanged rather than raising.
 
 **Env vars** (`env.ts:2-11`):
 

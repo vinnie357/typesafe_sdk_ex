@@ -101,7 +101,8 @@ defmodule TypeSafe.Errors do
   end
 
   defp fallback_detail(nil, _raw_body), do: "status code (no body)"
-  defp fallback_detail(_decoded_body, raw_body), do: truncate(raw_body)
+  defp fallback_detail(_decoded_body, raw_body) when is_binary(raw_body), do: truncate(raw_body)
+  defp fallback_detail(_decoded_body, raw_body), do: truncate(inspect(raw_body))
 
   defp truncate(text) do
     case String.length(text) > @max_raw_body_in_message do
