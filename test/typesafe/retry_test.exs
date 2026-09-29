@@ -43,6 +43,18 @@ defmodule TypeSafe.RetryTest do
     assert Retry.parse_retry_after(input, @now_ms) == 250
   end
 
+  # §11 S3a #3: zero is a valid retry-after-ms (S3b's end-to-end tests send ms 0).
+  test "retry-after-ms zero alone is 0, not invalid" do
+    assert Retry.parse_retry_after(headers([{"retry-after-ms", "0"}]), @now_ms) == 0
+  end
+
+  # §11 S3a #3, §5 "several values": the first retry-after-ms value is used.
+  test "first of several retry-after-ms values wins" do
+    input = %{"retry-after-ms" => ["250", "900"]}
+
+    assert Retry.parse_retry_after(input, @now_ms) == 250
+  end
+
   # §11 S3a #4 (new; retry.ts:39-45 returns ms only when finite and >= 0,
   # otherwise falls through to retry-after).
   test "invalid retry-after-ms falls through to retry-after" do
@@ -147,5 +159,25 @@ defmodule TypeSafe.RetryTest do
 
     assert %TypeSafe.Error.RateLimit{retry_after_ms: 1500} =
              Errors.from_response(seconds_response)
+  end
+
+  # §11 S3a #9, HTTP-date branch: a 2015 date is in the past against any real
+  # clock, so the result is 0. A from_response/1 that passed a wrong `now`
+  # (0, or seconds instead of ms) would return a large positive number.
+  test "Errors.from_response on a 429 with a past HTTP date has retry_after_ms 0" do
+    response = %Req.Response{
+      status: 429,
+      headers: %{"retry-after" => ["Wed, 21 Oct 2015 07:28:00 GMT"]},
+      body: ""
+    }
+
+    assert %TypeSafe.Error.RateLimit{retry_after_ms: 0} = Errors.from_response(response)
+  end
+
+  # §10 S3a AC(4), §12 q18: :inets must be a declared application so a release
+  # bundles :httpd_util. Compilation in test env cannot detect its absence
+  # (credo loads :inets); the app spec can.
+  test ":inets is declared in the application spec" do
+    assert :inets in Application.spec(:typesafe_sdk_ex, :applications)
   end
 end
