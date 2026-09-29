@@ -158,7 +158,10 @@ Every other default matches JS, so 408, 429, 5xx, and connection errors still re
 - `retry-after-ms` wins when present and it is a finite number `>= 0`.
 - Otherwise `retry-after`: a number `>= 0` means seconds × 1000 (`"1.5"` → 1500). A negative number → nil. An HTTP date → `max(0, date - now)`. Garbage → nil (`retry.test.ts:54-77`).
 - The result is an integer: round fractional milliseconds (`"1.5"` → 1500, `retry-after-ms: "10.4"` → 10).
-- Accept trimmed non-negative decimals only. `"0x10"`, `"1e3"`, and similar are nil (JS `Number()` would accept them, `retry.ts:44`; §12 q15 resolved).
+- Accept only values matching `^\d+(\.\d+)?$` after trimming whitespace. `""`, `"   "`, `".5"`, `"5."`, `"+5"`, `"1e3"`, and `"0x10"` are nil. This deliberately deviates from JS `Number()`, which accepts all of these (`retry.ts:39,44`; §12 q15 resolved). A blank `retry-after-ms` is invalid, so it falls through to `retry-after`.
+- Rounding is `Kernel.round/1` (half away from zero): `retry-after-ms: "2.5"` → 3.
+- An HTTP date is whatever `:httpd_util.convert_request_date/1` accepts (RFC 1123, RFC 850, asctime: the forms RFC 9110 §5.6.7 permits). Anything else is nil.
+- When a header carries several values, the first one is used.
 - Take `now` as a parameter so tests stay pure.
 - The parser is `TypeSafe.Retry.parse_retry_after(headers, now_ms)`, and `TypeSafe.Error.RateLimit.retry_after_ms` uses it too (`errors.ts:94`). The S2 integer-seconds-only parse is replaced in S3a.
 - Req's HTTP-date parser lives in `Req.Utils`, which is `@moduledoc false` (`req@0.7.4 lib/req/utils.ex:2`), so do not depend on it. Use OTP's `:httpd_util.convert_request_date/1`. verified: it returns `{{2026,10,21},{7,28,5}}` without starting `:inets`. Convert with `NaiveDateTime`/`DateTime` from stdlib.
@@ -456,14 +459,14 @@ Retry-After tests send `retry-after-ms: 0`, so every delay is 0 and `Process.sle
 
 #### S3a — `test/typesafe/retry_test.exs` (pure)
 1. `no headers → nil` (`retry.test.ts:72`)
-2. `retry-after seconds`: "3" → 3000, "0" → 0, "1.5" → 1500 (`retry.test.ts:55-59`)
+2. `retry-after seconds`: "3" → 3000, "0" → 0, "1.5" → 1500 (`retry.test.ts:55-59`); first of several values wins: ["2", "9"] → 2000
 3. `retry-after-ms preferred`: ms 250 with retry-after 3 → 250 (`retry.test.ts:61-63`)
 4. `invalid ms falls through`: ms "nope" and ms "-1", each with retry-after "3" → 3000 (new; `retry.ts:39-45`)
-5. `HTTP date against an injected now`: +5s → 5000, past → 0 (`retry.test.ts:65-69`)
-6. `garbage and negative → nil`: "soon", "-5", and ms "nope" alone (`retry.test.ts:71-76`)
-7. `fractional ms rounded`: ms "10.4" → 10, and `is_integer/1` (new; `steps.ex:1803`)
-8. `non-decimal forms rejected`: "0x10" → nil (new; §12 q15)
-9. `Errors.from_response 429`: ms "1500" → `retry_after_ms` 1500, and retry-after "1.5" → 1500 (`errors.ts:94`; pure)
+5. `HTTP date against an injected now`: +5s → 5000, past → 0 (`retry.test.ts:65-69`); RFC 850 and asctime forms too
+6. `garbage and negative → nil`: "soon", "-5", and ms "nope" alone (`retry.test.ts:71-76`); blank "" and "   " → nil for both headers, and a blank ms falls through to retry-after
+7. `fractional ms rounded`: ms "10.4" → 10, ms "2.5" → 3 (`Kernel.round/1`), and `is_integer/1` (new; `steps.ex:1803`)
+8. `non-decimal forms rejected`: "0x10", "1e3", ".5", "5.", "+5" → nil (new; §12 q15)
+9. `TypeSafe.Errors.from_response/1` on a 429: ms "1500" → `retry_after_ms` 1500, and retry-after "1.5" → 1500 (`errors.ts:94`; pure)
 
 #### S3b — `test/typesafe/retry_test.exs` (pure, continued)
 10. `RetryPolicy.merge with [] returns the same policy`
@@ -574,7 +577,7 @@ The S3c tests that could hit a timeout set `max_retries: 0` from the start.
 
 13. **Timeout semantics. RESOLVED (S3 plan, 2026-09-29).** JS bounds headers plus the full body per attempt (`client.ts:403-447`). Req `receive_timeout` is a socket-receive timeout (`req@0.7.4 lib/req.ex:445`), so a server that trickles its body can exceed the total. Accepted: the port keeps per-receive `receive_timeout` semantics and documents the trickle case; no `Task.await`-bounded attempt. The connect timeout is Req/Finch's default (unverified).
 14. **`User-Agent` / `X-TypeSafe-SDK` / `X-TypeSafe-Runtime` values** for the Elixir SDK. Options are `typesafe-sdk/<ex-version>` or `typesafe-sdk-ex/<version>`, and `elixir/<System.version()> (otp/<release>)`. Whether the server parses these is unknown.
-15. **Retry-After number parsing. RESOLVED (S3 plan, 2026-09-29).** JS `Number()` accepts `"0x10"`, `"1e3"`, and whitespace (`retry.ts:44`). The port supports trimmed non-negative decimals only (§5).
+15. **Retry-After number parsing. RESOLVED (S3 plan, 2026-09-29).** JS `Number()` accepts `"0x10"`, `"1e3"`, and whitespace (`retry.ts:44`). The port supports only `^\d+(\.\d+)?$` after trimming (§5). Lead decisions (S3a test-author round): (1) a blank or whitespace-only value is nil, not 0, because JS `Number("")` = 0 would mean an immediate retry against a rate-limiting server; a deliberate deviation from JS. (2) The decimal grammar is strict, so `".5"`, `"5."`, `"+5"`, `"1e3"`, `"0x10"` are nil; a deliberate deviation from JS. (3) Rounding is `Kernel.round/1`. (4) HTTP dates are whatever `:httpd_util.convert_request_date/1` accepts (RFC 1123, RFC 850, asctime), else nil. (5) Multiple values for one header: the first is used.
 16. **Explicit empty `api_key: ""`. RESOLVED — operator decision (Gate 4 review N7).** JS accepts it, because `??` falls back only on null/undefined (`env.ts:22-23`), and then sends `Bearer `. The Elixir port does NOT mirror that: an explicit blank or whitespace-only `api_key` option (`""`, `"   "`) is rejected with the same `{:error, %TypeSafe.Error{message: m}}` (`m =~ "TYPESAFE_API_KEY"`) as a blank environment value — an explicit blank is treated identically to "not given," not as "given but empty."
 17. **Raw-body error message.** JS re-stringifies the parsed body (`errors.ts:64`); Elixir uses the original text (§6). The two differ only when the server sends non-compact JSON. Is that acceptable?
 18. **`:inets` in releases. RESOLVED (S3 plan, 2026-09-29).** `:httpd_util` works in `mix`/`elixir` without starting inets (verified), and a release needs `:inets` in `extra_applications` to bundle it, so S3a adds it. A test-env CI run cannot detect its absence (§5). Log capture goes through the `logger:` option (§7, verified), and the HTTP-date parser is `:httpd_util` (§5, verified).
