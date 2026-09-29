@@ -21,6 +21,7 @@ Citation forms:
 3. Configuration resolves in this order: explicit option, then env var, then default (`src/client.ts:267-289`, `src/env.ts:1-23`).
 4. Reliability layer: a per-attempt timeout, and retries with capped exponential backoff plus jitter that honor `Retry-After`/`retry-after-ms` (`src/retry.ts`, `src/client.ts:350-470`).
 5. Non-2xx responses become a status-mapped error hierarchy (`src/errors.ts:69-78`). Logging is level-filtered and redacts credential headers (`src/logging.ts`).
+6. Upstream re-verified identical to `66880cc` on 2026-09-29 (GitHub compare `66880cc...HEAD`: identical, ahead_by 0; `main` is v0.6.0). No retry, timeout, Retry-After, error, or logging drift.
 
 ## 2. Public API inventory → Elixir mapping
 
@@ -106,8 +107,8 @@ Precedence is explicit option, then env, then default. JS treats only `undefined
 | `defaultModel` → `default_model` | env, then `jev-latest` | client. Per call through `request.model` (`client.ts:318`). | — |
 | `logLevel` → `log_level` | env, then `warn` | client | must be one of the levels, and the error names its source: `"loud" from TYPESAFE_LOG_LEVEL` or ``the `logLevel` option`` (`logging.ts:13-18`, `client.ts:157-162`, `client.test.ts:119-128`) |
 | `logger` → `logger` (§7) | Logger | client | — |
-| `retry` → `retry` (keyword) | §5 | client **and** per call. Merged field by field with the client policy (`client.ts:337`, `reliability.test.ts:383-400`). | §5 |
-| `timeout` → `timeout` (ms) | `10_000` (`retry.ts:5`) | client **and** per call (`client.ts:335-336`) | positive (`client.ts:77-84`, `reliability.test.ts:524-534`) |
+| `retry` → `retry` (keyword) | §5 | client **and** per call. Merged field by field with the client policy (`client.ts:337`, `reliability.test.ts:383-400`). | a keyword list checked by `TypeSafe.RetryPolicy.merge/2`. An unknown key is named. `http_statuses` is a list, `Range`, or `MapSet` of integers from 100 to 999. Numeric fields are non-negative and `max_retries` is a non-negative integer. `nil` is rejected. Message form: `"retry.max_retries must be a non-negative integer, got -1"`. §5 |
+| `timeout` → `timeout` (ms) | `10_000` (`retry.ts:5`) | client **and** per call (`client.ts:335-336`) | positive **integer**. Floats and `nil` are rejected, with no env fallback. JS accepts any positive finite number (`client.ts:77-84`); the port restricts to integers (deviation; unverified whether `receive_timeout` accepts a float). `reliability.test.ts:524-534` |
 | `defaultHeaders` → `default_headers` | `%{}` | client. Per call: `headers` (`types.ts:205`). | — |
 | `fetch` → `req_options` (keyword merged into `Req.new/1`; tests pass `adapter: TypeSafe.StubAdapter`, see §11) | `[]` | client | — |
 | — → `get_env` | `&System.get_env/1` | client | test seam for env (§3) |
@@ -119,7 +120,7 @@ Option **keys** are checked with `Keyword.validate/2`. verified: it returns `{:o
 
 Per-call validation errors (bad `timeout` or `retry`) come back before any request is sent (`reliability.test.ts:168-180,402-421`). Elixir returns `{:error, %TypeSafe.Error{}}` in that case.
 
-**`req_options` cannot override SDK-owned request settings (Gate 4 review round 2, R2, operator decision).** `req_options` is the caller's escape hatch into `Req.new/1` — the Elixir analogue of JS's `fetch` option — not a route around the client's own guarantees. `base_url` and `auth` are forced the same way `decode_body` and `retry` already are (§3): a `req_options: [base_url: ...]` or `req_options: [auth: ...]` value is silently overridden, so the client's configured `base_url` and `authorization` header are what the request actually uses, regardless of what `req_options` requests. `receive_timeout` is handled differently: it is **rejected** at `new/1` with `{:error, %TypeSafe.Error{}}` naming the option, not silently overridden — `receive_timeout` has its own future `:timeout` option (§5, S3), so accepting it via `req_options` and then ignoring it would be a silent no-op that misleads a caller into believing their timeout took effect. **Scope of this protection (Gate 4 follow-up on 6701bd5):** only `base_url`, `auth`, `decode_body`, `retry`, and `receive_timeout` are handled specially. Every other `Req.new/1` option — `pool_timeout`, `connect_options`, and the rest — passes through `req_options` unvalidated today; S3 (retry/timeout semantics) is expected to revisit the remaining timeout-related keys (e.g. `pool_timeout`) as part of its own scope, not this one.
+**`req_options` cannot override SDK-owned request settings (Gate 4 review round 2, R2, operator decision).** `req_options` is the caller's escape hatch into `Req.new/1` — the Elixir analogue of JS's `fetch` option — not a route around the client's own guarantees. `base_url` and `auth` are forced the same way `decode_body` and `retry` already are (§3): a `req_options: [base_url: ...]` or `req_options: [auth: ...]` value is silently overridden, so the client's configured `base_url` and `authorization` header are what the request actually uses, regardless of what `req_options` requests. `receive_timeout` is handled differently: it is **rejected** at `new/1` with `{:error, %TypeSafe.Error{}}` naming the option, not silently overridden — `receive_timeout` has its own future `:timeout` option (§5, S3c), so accepting it via `req_options` and then ignoring it would be a silent no-op that misleads a caller into believing their timeout took effect. **Scope of this protection (Gate 4 follow-up on 6701bd5, amended for S3):** `base_url`, `auth`, `decode_body`, `retry`, and `receive_timeout` are handled specially. From S3b, `retry_delay`, `max_retries`, and `retry_log_level` are also **rejected** at `new/1`, naming the key. The retry wiring owns them: `retry_delay` together with `{:delay, _}` raises `ArgumentError` (`req@0.7.4 lib/req/steps.ex:1748-1753`), and `max_retries` and `retry_log_level` would silently override the policy (`steps.ex:1810-1811`). `pool_timeout` and `connect_options` stay pass-through, and this closes the earlier "S3 revisits" note: `connect_options` starts a dedicated Finch pool (`req.ex:425`), and `pool_timeout` is deprecated at top level (`req.ex:550-552`, §5).
 
 **Header values are a simple map, not Req's native multi-value list form (Gate 4 review round 2, R3, operator decision).** A header value must be a binary, an atom, or a number (atoms and numbers are coerced to strings, matching `to_string/1`); `nil` deletes the header instead of sending it empty or as the literal string `"nil"` (§3 L62 already establishes the delete-on-nil rule for the existing per-call/default-headers path). A list value — Req's own multi-value header representation — is **rejected**, not coerced and not accepted: the SDK's header surface (`default_headers`, per-call `headers`) is deliberately a simple one-value-per-name map, unlike Req's `Req.Request.t()` headers, which are `%{String.t() => [String.t()]}`. A caller needing repeated header names is expected to use `req_options` directly (subject to the protections above) rather than the SDK's own `headers`/`default_headers` options. The `headers` container itself must be a map — `nil` or a binary for the whole option is rejected, not treated as "no headers."
 
@@ -139,10 +140,12 @@ Per-call validation errors (bad `timeout` or `retry`) come back before any reque
 | `respect_retry_after` | true | boolean |
 | `max_retry_after_ms` | 60_000 | non-negative, finite |
 | `api_connection_error` | true | boolean |
-| `api_timeout_error` | true | boolean |
+| `api_timeout_error` | **false** (JS: true, `retry.ts:22`) | boolean. **Deliberate deviation from JS (operator decision 2026-09-29, §12 q20):** timeout retries are opt-in, for every call, not only POST. A timed-out `POST /v1/systemone` may already have run and billed, and the API has no idempotency key (`client.ts:321-400`, `api.md:L338`). |
+
+Every other default matches JS, so 408, 429, 5xx, and connection errors still retry by default. Delays are non-negative integers, so `delay_ms` and `parse_retry_after` apply `round/1`: JS returns fractional milliseconds, but Req accepts only an integer `{:delay, _}` (`req@0.7.4 lib/req/steps.ex:1803`).
 
 **Retry decision** (`client.ts:364-400`), where attempt `n` counts from 0 and `retries_left = max_retries - n`:
-- Transport error: retry when `retries_left > 0` and the error is a `Timeout` with `api_timeout_error` set, or a `Connection` with `api_connection_error` set (`client.ts:150-154,383-384`). A timeout is checked before a connection error.
+- Transport error: retry when `retries_left > 0` and the error is a `Timeout` with `api_timeout_error` set, or a `Connection` with `api_connection_error` set (`client.ts:150-154,383-384`). A timeout is checked before a connection error. In `decide/2`, a `Req.TransportError{reason: :timeout}` follows `api_timeout_error` and any other exception follows `api_connection_error`. With the Elixir default (`api_timeout_error: false`) a timeout returns the error at once.
 - HTTP response: 2xx returns. Otherwise build the mapped error, and retry only when `retries_left > 0` and the status is in `http_statuses` (`client.ts:393-399`). 400, 401, 403, 404, 409, 422, and 600 do not retry by default (`retry.test.ts:42-44`).
 - After retries run out, the **last** error is returned (`reliability.test.ts:94-99`).
 
@@ -154,10 +157,16 @@ Per-call validation errors (bad `timeout` or `retry`) come back before any reque
 **Retry-After parsing** (`retry.ts:38-49`):
 - `retry-after-ms` wins when present and it is a finite number `>= 0`.
 - Otherwise `retry-after`: a number `>= 0` means seconds × 1000 (`"1.5"` → 1500). A negative number → nil. An HTTP date → `max(0, date - now)`. Garbage → nil (`retry.test.ts:54-77`).
+- The result is an integer: round fractional milliseconds (`"1.5"` → 1500, `retry-after-ms: "10.4"` → 10).
+- Accept trimmed non-negative decimals only. `"0x10"`, `"1e3"`, and similar are nil (JS `Number()` would accept them, `retry.ts:44`; §12 q15 resolved).
 - Take `now` as a parameter so tests stay pure.
-- Req's HTTP-date parser lives in `Req.Utils`, which is `@moduledoc false` (`req@0.7.4 lib/req/utils.ex:2`), so do not depend on it. Use OTP's `:httpd_util.convert_request_date/1`. verified: it returns `{{2026,10,21},{7,28,5}}` without starting `:inets`. Convert with `NaiveDateTime`/`DateTime` from stdlib. Add `:inets` to `extra_applications` so releases include the module (requires verification in a release build).
+- The parser is `TypeSafe.Retry.parse_retry_after(headers, now_ms)`, and `TypeSafe.Error.RateLimit.retry_after_ms` uses it too (`errors.ts:94`). The S2 integer-seconds-only parse is replaced in S3a.
+- Req's HTTP-date parser lives in `Req.Utils`, which is `@moduledoc false` (`req@0.7.4 lib/req/utils.ex:2`), so do not depend on it. Use OTP's `:httpd_util.convert_request_date/1`. verified: it returns `{{2026,10,21},{7,28,5}}` without starting `:inets`. Convert with `NaiveDateTime`/`DateTime` from stdlib.
+- `:inets` is added to `extra_applications` (§12 q18 resolved). `credo` lists `:inets` in its `extra_applications` (`deps/credo/mix.exs:170`), so a test-env CI run cannot detect its absence; S3a runs one `MIX_ENV=prod mix compile --warnings-as-errors` and quotes the output in the PR.
 
-**Timeout** (`client.ts:403-447`). The timeout applies per attempt and there is no total budget (`types.ts:200`). A timeout produces `Timeout{timeout_ms}` with message `"Request timed out after 1000ms."` (`reliability.test.ts:445-458`). Each retry gets a fresh timeout (`reliability.test.ts:476-491`).
+**Timeout** (`client.ts:403-447`). The timeout applies per attempt and there is no total budget (`types.ts:200`). A timeout produces `Timeout{timeout_ms}` with message `"Request timed out after 1000ms."` (`reliability.test.ts:445-458`). Each retry gets a fresh timeout (`reliability.test.ts:476-491`). `Timeout{timeout_ms}` carries the **effective** per-call timeout, not always the client's (S3c; today `client.timeout` is used).
+
+**POST retries (operator decision 2026-09-29, §12 q20).** JS retries `POST /v1/systemone` on 5xx, 408, 429, connection errors, and timeouts, with no idempotency key (`client.ts:321-400`, `release-regressions.test.ts:15-58`). `api.md:L338` says the client SDKs handle 429/529 retries automatically. The port keeps that parity for statuses and connection errors, but **timeouts are not retried unless the caller opts in** with `retry: [api_timeout_error: true]`: a timed-out request may already have been processed and billed. A connection error dropped mid-response carries a smaller double-billing risk, which remains under JS parity. The opt-out is `retry: [api_connection_error: false]`, and `retry: [max_retries: 0]` disables retries entirely. The README documents both.
 
 The Elixir mapping is Req `receive_timeout: timeout` (`req@0.7.4 lib/req.ex:445`), and a `Req.TransportError{reason: :timeout}` maps to `Timeout`. The semantics differ; see §12. Do not set a top-level `:pool_timeout`: in 0.7.4 it emits a deprecation warning pointing at `finch: [pool_timeout: ...]` (`req.ex:550-552`). The JS SDK has no pool concept, so Req's default is kept.
 
@@ -166,7 +175,9 @@ The Elixir mapping is Req `receive_timeout: timeout` (`req@0.7.4 lib/req.ex:445`
 - Req's own Retry-After handling covers only 429/503, reads `retry-after` only, and has no ceiling (`steps.ex:1824-1840`, `response.ex` `get_retry_after/1`). Returning `{:delay, ms}` bypasses it.
 - **Why `:retry_delay` is not used.** A `:retry_delay` function receives only the retry count (`steps.ex:1693-1700`), so it cannot see `retry-after-ms` or apply the ceiling. Worse, once `:retry_delay` is set, Req skips Retry-After entirely even on 429/503 (`steps.ex:1826-1828`). Setting `:retry_delay` together with `{:delay, _}` also raises (`steps.ex:1753`).
 - **Hand-rolled on top of Req, with reasons:** (1) the delay formula with jitter and the cap, because `:retry_delay` cannot express the Retry-After branch; (2) the Retry-After parser, because Req reads neither `retry-after-ms`, decimals, nor a ceiling; (3) the status set and the per-error flags inside `decide/2`, because `:safe_transient`/`:transient` use a fixed list. Jitter uses `:rand.uniform/0`, whose range is 0.0 ≤ x < 1.0, matching JS `Math.random`.
-- Also set `max_retries: policy.max_retries` (`steps.ex:1704,1810-1813`) and `retry_log_level: false`.
+- Wiring is **per call**: `Req.request(req, retry: &TypeSafe.Retry.decide/2, max_retries: policy.max_retries, retry_log_level: false, receive_timeout: t)` (`steps.ex:1704,1810-1813`). The effective policy travels in `request.private[:typesafe_retry_policy]`. `client.req` itself keeps `retry: false` (S1 B2 test).
+- `decide/2` returns `false` once `:req_retry_count >= max_retries`. Req still calls the retry fun when retries are exhausted (`steps.ex:1808-1813`), so without the check S5 would log phantom retries.
+- A `{:delay, 0}` still calls `Process.sleep(0)` (`steps.ex:1803-1815`), so zero-delay end-to-end tests are sound.
 - The attempt number is `Req.Request.get_private(request, :req_retry_count, 0)` (`steps.ex:1808`). `run_request/1` re-runs every request step on each retry (`request.ex:1032-1050`). A custom request step can therefore set `x-typesafe-retry-count` from that private counter.
 - **Sleep cannot be injected.** Req calls `Process.sleep(delay)` directly (`steps.ex:1815`).
 - **The adapter runs inside Req's retry loop, so stubbed tests exercise real Req retries.**
@@ -193,7 +204,7 @@ The Elixir mapping is Req `receive_timeout: timeout` (`req@0.7.4 lib/req.ex:445`
 | 404 | `NotFoundError` | `TypeSafe.Error.NotFound` |
 | 422 | `UnprocessableEntityError` | `TypeSafe.Error.UnprocessableEntity` |
 | 429 | `RateLimitError` (+`retryAfterMs`) | `TypeSafe.Error.RateLimit` (+`retry_after_ms`) |
-| ≥500 (incl. 529 Overloaded, `api.md:L319`) | `InternalServerError` | `TypeSafe.Error.InternalServer` |
+| ≥500 (incl. 529 Overloaded, `api.md:L334`) | `InternalServerError` | `TypeSafe.Error.InternalServer` |
 | any other non-2xx (e.g. 409, 418) | `APIError` | `TypeSafe.Error.API` |
 | transport failure | `APIConnectionError`, message `"Connection error: <cause>"` (`client.ts:440-443`) | `TypeSafe.Error.Connection{message, reason}` |
 | timeout | `APITimeoutError` (a subclass of Connection) | `TypeSafe.Error.Timeout{message, timeout_ms}`. This is a separate struct because Elixir has no inheritance. |
@@ -337,17 +348,36 @@ AC:
 **S2: error mapping.** Depends on S1. §6 structs, messages, `request_id`, `retry_after_ms`, text and empty bodies, transport error wrapping, and the bad `/v1/models` shape. The tests run with `max_retries: 0`.
 AC: every row in the §6 table is covered by at least one test, and each message rule in §6 is asserted verbatim.
 
-**S3: retries and timeouts.** Depends on S2. Pure `TypeSafe.Retry` functions plus Req wiring (`decide/2`, `max_retries`, retry-count request step), per-call overrides, timeout mapping, and validation of retry and timeout values.
+**S3: retries and timeouts.** Depends on S2. Split into three sequential sub-slices, S3a → S3b → S3c; v0.2.0 ships all three. The order avoids two delayed fuses: S3c before S3b would make its timeout test sleep once retries turn on, and the `error_test.exs` fixture edit cannot land before `retry:` is an accepted option.
+
+**S3a: Retry-After parser.** Depends on S2; ships alone and changes no retry behavior. New `TypeSafe.Retry` (`@moduledoc false`) with `parse_retry_after(headers, now_ms) :: non_neg_integer() | nil`. `TypeSafe.Errors` builds the 429 `retry_after_ms` through it (`now = System.os_time(:millisecond)`), replacing the integer-seconds parse at `lib/type_safe/errors.ex:79-91`. `:inets` joins `extra_applications`. The README drops "integer-seconds only".
+AC:
+- (1) `retry-after-ms` wins when it is a finite number `>= 0`. Otherwise `retry-after` seconds (decimals) × 1000. Otherwise an HTTP date → `max(0, date - now)`. Negative or garbage → nil. The result is an integer (`round/1`).
+- (2) `RateLimit.retry_after_ms` reflects (1).
+- (3) The existing S2 `error_test.exs` 7000 and nil tests (`error_test.exs:154-165`) stay green.
+- (4) `mise run ci` is green, and one `MIX_ENV=prod mix compile --warnings-as-errors` succeeds with `:inets` declared.
+
+**S3b: retry engine.** Depends on S3a. `TypeSafe.RetryPolicy.merge(policy, overrides) :: {:ok, t} | {:error, %TypeSafe.Error{}}` (`Keyword.validate/2` plus guards, never raises). `TypeSafe.Retry.delay_ms(attempt, headers | nil, policy, random_fun)`. `TypeSafe.Retry.decide/2`. Per-call Req wiring and the `typesafe_retry_count` request step (§5). `retry:` is accepted at `new/1` (resolved into `client.retry`) and per call on both functions. `req_options` rejects `retry_delay`, `max_retries`, and `retry_log_level` (§4). The default policy has `api_timeout_error: false` (§5, q20). Docs: README Retries section and POST note, `lib/type_safe.ex` option doc, `RetryPolicy` moduledoc.
 AC:
 - (1) Exact §5 delay values come from the pure functions.
-- (2) End-to-end attempt counts are correct for retryable and non-retryable statuses, for connection and timeout errors with each flag toggled, and for per-call overrides.
-- (3) `X-TypeSafe-Retry-Count` is absent, then 1, then 2.
-- (4) No test calls `Process.sleep` with a delay above 0. The suite for this slice runs in under 2s.
+- (2) End-to-end attempt counts are correct for retryable and non-retryable statuses, for connection errors and timeouts with each flag toggled, for per-call overrides, and for POST. A `:timeout` is **not** retried by default (1 request) and is retried with `retry: [api_timeout_error: true]`.
+- (3) `X-TypeSafe-Retry-Count` is absent, then `"1"`, then `"2"`, and a caller's value is removed on every attempt.
+- (4) An invalid `retry` at `new/1` or per call returns `{:error, %TypeSafe.Error{}}` naming `retry.<field>`, with zero requests.
+- (5) No test calls `Process.sleep` with a delay above 0, and the suite runs in under 2s.
+- (6) The S1 B2 test (`client_test.exs:464-470`, `client.req` carries no built-in retry) stays green unmodified.
+- (7) Req retry logging is off (`retry_log_level: false`).
+
+**S3c: timeout option.** Depends on S3b. `timeout:` (positive integer ms) at `new/1` and per call → `receive_timeout` and `Timeout{timeout_ms, message}`. `pool_timeout` and `connect_options` stay pass-through (§4). The README fixed-timeout limitation is updated.
+AC:
+- (1) Client and per-call values reach `receive_timeout` on every attempt.
+- (2) `Timeout` reports the effective value.
+- (3) An invalid value (0, negative, float, `nil`, non-number) is rejected at both levels before any request.
+- (4) The existing N2 and R2 tests (`client_test.exs:522-524,712-736`) stay green.
 
 **S4: question helpers and pre-send validation.** Depends on S1; it can run in parallel with S2 and S3. §8 builders, wire preservation of nil, lists, and omitted keys, and validation with zero requests.
 AC: every §8 row and validation message is asserted, and the stub adapter receives 0 calls on validation failure (`refute_received {:sent, _}`).
 
-**S5: logging.** Depends on S3, because the retry lines exist only after S3. §7 levels, lines, redaction, and log-level validation.
+**S5: logging.** Depends on S3b, because the retry lines exist only after S3b. §7 levels, lines, redaction, and log-level validation.
 AC:
 - (1) Nothing is emitted at the default level or at `:off`.
 - (2) The info summary and retry lines match the §7 formats.
@@ -397,7 +427,7 @@ Conventions for every test file:
 20. `body parsing: system_one on 204 empty body returns {:ok, nil}` (`release-regressions.test.ts:148-153`, adapted)
 
 ### S2 — `test/typesafe/error_test.exs`
-1. `maps status to struct`, parameterized over 400, 401, 403, 404, 422, 429, 500, 503, 529, 418 (`errors.test.ts:20-40`; 529 is new, from `api.md:L319`)
+1. `maps status to struct`, parameterized over 400, 401, 403, 404, 422, 429, 500, 503, 529, 418 (`errors.test.ts:20-40`; 529 is new, from `api.md:L334`)
 2. `every API error carries status, body, headers, request_id` (`errors.test.ts:43-57`)
 3. `message: error.message` → `"401 invalid api key"` (`errors.test.ts:43-57`)
 4. `message extraction`, parameterized: `error` string, `message`, `detail` string, `detail.message`, `detail` list → `"questions.q.score.criteria: Input should be a valid list; questions: Dictionary should have at least 1 item"` (`errors.test.ts:59-89`)
@@ -411,43 +441,83 @@ Conventions for every test file:
 12. `transport :timeout` → `%Timeout{timeout_ms: t, message: "Request timed out after <t>ms."}` (`reliability.test.ts:445-458`)
 13. `list_models unexpected shape returns TypeSafe.Error`, parameterized over `nil`, `[]`, `{"models":{"models":[]}}`, `{"models":null}`, `{"models":"bad"}`, `{"ok":true}` (`client.test.ts:176-185`)
 
-### S3 — `test/typesafe/retry_test.exs` (pure) and `test/typesafe/reliability_test.exs` (stubbed)
-Pure:
-1. `default policy values and status set` (`retry.test.ts:17-36`)
-2. `retryable statuses by default`: 408, 429, 500, 502, 503, 504, 529, 599 → true; 200, 400, 401, 403, 404, 409, 422, 600 → false (`retry.test.ts:38-44`)
-3. `custom and empty http_statuses` (`retry.test.ts:46-51`)
-4. `parse_retry_after seconds`: "3" → 3000, "0" → 0, "1.5" → 1500 (`retry.test.ts:55-59`)
-5. `retry-after-ms preferred` (`retry.test.ts:61-63`)
-6. `HTTP date relative to injected now; past → 0` (`retry.test.ts:65-69`)
-7. `missing/garbage/negative → nil` (`retry.test.ts:71-76`)
-8. `delay_ms exponential 500..5000 with zero jitter` (`retry.test.ts:84-88`)
-9. `jitter shaves at most fraction` → 375, 875 (`retry.test.ts:90-93`)
-10. `Retry-After honored exactly without jitter` (`retry.test.ts:95-98`)
-11. `Retry-After over ceiling falls back to backoff`: 61s → 500, 60s → 60000, ms 60001 → 375 (`retry.test.ts:100-105`)
-12. `policy initial/cap/jitter respected` (`retry.test.ts:107-114`)
-13. `respect_retry_after false ignores header` (`retry.test.ts:116-119`)
-14. `max_retry_after_ms ceiling` (`retry.test.ts:121-125`)
-15. `decide/2 returns {:delay, 2000} for 429 with retry-after 2 and false for 400`: a direct call with a built request and response, no HTTP (new)
-16. `validation names each bad field`: max_retries -1 and 1.5, backoff_initial_ms -1, backoff_jitter 1.5 and -0.1, http_statuses containing 42, zeros accepted, jitter 1 accepted (`reliability.test.ts:168-180,402-421`; the NaN and ±Infinity cases are not representable)
+### S3 — split into S3a, S3b, and S3c
 
-Stubbed (every client uses zero backoff):
-17. `429 then 200 succeeds, 2 requests` (`reliability.test.ts:51-73`, using `retry-after-ms: 0` in place of `retry-after: 2`)
-18. `503, 503, 200 succeeds after 3 requests` (`reliability.test.ts:75-92`)
-19. `gives up after max_retries and returns last error`: max 3 → 4 requests, `InternalServer` (`reliability.test.ts:94-99`)
-20. `400 not retried`: 1 request (`reliability.test.ts:101-106`)
-21. `POST system_one retries 503` (new: guards against Req's `:safe_transient` GET-only default)
-22. `connection error retried then succeeds` (`reliability.test.ts:108-117`)
-23. `per-call max_retries 0 overrides client 5` (`reliability.test.ts:144-151`)
-24. `per-call retry override merges field by field and leaves client policy unchanged` (`reliability.test.ts:383-400`; the log-line assertion moves to S5)
-25. `X-TypeSafe-Retry-Count absent, "1", "2"` (`reliability.test.ts:153-166`)
-26. `caller-supplied retry-count removed on every attempt` (`release-regressions.test.ts:15-58`, retry-count part)
-27. `only statuses in http_statuses retried`: 409 retried with a custom set, 503 not retried with an empty set (`reliability.test.ts:260-278`)
-28. `api_connection_error false stops connection retries, timeouts still retried` (`reliability.test.ts:280-308`)
-29. `api_timeout_error false stops timeout retries, connection still retried` (`reliability.test.ts:310-338`)
-30. `respect_retry_after false with zero backoff still retries` (`reliability.test.ts:362-381`, delay-free variant)
-31. `per-call timeout is passed as receive_timeout`: assert on the built Req request, no stall (`reliability.test.ts:493-505`, adapted)
-32. `invalid timeout from option or per call returns error before any request` (`reliability.test.ts:524-534`)
-33. `invalid per-call retry returns error before any request` (`reliability.test.ts:176-180,414-421`)
+All stubbed tests use `TypeSafe.StubAdapter`. S3b stubbed clients go through one helper in `reliability_test.exs`, so no test misses zero backoff (a missed one sleeps 375–1500ms):
+
+```elixir
+defp retry_client(stub, opts) do
+  retry = Keyword.merge([backoff_initial_ms: 0, backoff_max_ms: 0], Keyword.get(opts, :retry, []))
+  StubAdapter.client(stub, Keyword.put(opts, :retry, retry))
+end
+```
+
+Retry-After tests send `retry-after-ms: 0`, so every delay is 0 and `Process.sleep(0)` returns at once. Stateful sequences use a `start_supervised` Agent.
+
+#### S3a — `test/typesafe/retry_test.exs` (pure)
+1. `no headers → nil` (`retry.test.ts:72`)
+2. `retry-after seconds`: "3" → 3000, "0" → 0, "1.5" → 1500 (`retry.test.ts:55-59`)
+3. `retry-after-ms preferred`: ms 250 with retry-after 3 → 250 (`retry.test.ts:61-63`)
+4. `invalid ms falls through`: ms "nope" and ms "-1", each with retry-after "3" → 3000 (new; `retry.ts:39-45`)
+5. `HTTP date against an injected now`: +5s → 5000, past → 0 (`retry.test.ts:65-69`)
+6. `garbage and negative → nil`: "soon", "-5", and ms "nope" alone (`retry.test.ts:71-76`)
+7. `fractional ms rounded`: ms "10.4" → 10, and `is_integer/1` (new; `steps.ex:1803`)
+8. `non-decimal forms rejected`: "0x10" → nil (new; §12 q15)
+9. `Errors.from_response 429`: ms "1500" → `retry_after_ms` 1500, and retry-after "1.5" → 1500 (`errors.ts:94`; pure)
+
+#### S3b — `test/typesafe/retry_test.exs` (pure, continued)
+10. `RetryPolicy.merge with [] returns the same policy`
+11. `merge is field by field`: max_retries 7 and jitter 0, the rest default (`reliability.test.ts:195-199`)
+12. `http_statuses accepts a list, a Range, or a MapSet, stored as a MapSet` (new)
+13. `validation names each bad field`: max_retries -1 and 1.5; backoff_initial_ms -1; jitter 1.5 and -0.1; http_statuses [503, 42] and [500.5]; a non-boolean flag; an unknown key; a non-keyword value. Each message `=~ "retry.<field>"` (`reliability.test.ts:168-180,402-421`)
+14. `boundaries accepted`: all-zero backoff and jitter; jitter 1 with `max_retry_after_ms` 0 (`reliability.test.ts:411-412`)
+15. `delay_ms exponential with zero jitter`: 500, 1000, 2000, 4000, 5000, 5000 (`retry.test.ts:84-88`)
+16. `jitter shaves at most the fraction`: attempt 0 with maximum jitter → 375, attempt 1 with random 0.5 → 875 (`retry.test.ts:90-93`)
+17. `Retry-After honored exactly`: 2000; ms 10 → 10 (`retry.test.ts:95-98`)
+18. `ceiling`: 61s → 500, 60s → 60000, ms 60000 → 60000, ms 60001 with max jitter → 375 (`retry.test.ts:100-105`)
+19. `policy initial, cap, and jitter respected`: 100, 200, 350, 350; 50; jitter 0 → 500 (`retry.test.ts:107-114`)
+20. `respect_retry_after false ignores the header` (`retry.test.ts:116-119`)
+21. `max_retry_after_ms ceiling of 1000` (`retry.test.ts:121-125`)
+22. `decide/2 on a 2xx → false` (new)
+23. `decide/2 defaults (jitter 0)`: 408, 429, 500, 502, 503, 504, 529, 599 → delay; 400, 401, 403, 404, 409, 422, 600 → false (`retry.test.ts:38-44`)
+24. `custom and empty sets`: 409 with [409] retried and 503 not; 503 with [] not (`retry.test.ts:46-51`)
+25. `decide/2 on a 429 with retry-after 2 → {:delay, 2000}; on a 400 → false` (new)
+26. `decide/2 on transport errors and exhaustion`: `:timeout` → false with the default policy and → delay with `api_timeout_error: true`; `:closed` follows `api_connection_error`; `:req_retry_count >= max_retries` → false (`client.ts:150-154,383-384`)
+
+#### S3b — `test/typesafe/reliability_test.exs` (stubbed)
+27. `200 on the first attempt`: 1 request, no retry-count header
+28. `429 (retry-after-ms 0) then 200`: 2 requests (`reliability.test.ts:51-73`)
+29. `503, 503, 200`: 3 requests (`reliability.test.ts:75-92`)
+30. `gives up`: max 3 → 4 requests, and `InternalServer` carries the 4th body (the bodies differ) (`reliability.test.ts:94-99`)
+31. `400 not retried`: 1 request, `BadRequest` (`reliability.test.ts:101-106`)
+32. `POST system_one retries 503`: 2 POSTs (`release-regressions.test.ts:15-58`)
+33. `:closed then 200`: 2 requests (`reliability.test.ts:108-117`)
+34. `per-call max_retries 0 overrides client 5`: 1 request (`reliability.test.ts:144-151`)
+35. `per-call merges field by field`, and `client.retry` is unchanged (`reliability.test.ts:383-400`)
+36. `X-TypeSafe-Retry-Count` absent, `"1"`, `"2"` (`reliability.test.ts:153-166`)
+37. `a caller's retry-count removed on every attempt`, protected headers intact (`release-regressions.test.ts:15-58`)
+38. `only listed statuses retried`: 409 with [409] → 3 requests; 503 with [] → 1 (`reliability.test.ts:260-278`)
+39. `api_connection_error false`: `:closed` → 1 request; with `api_timeout_error: true` and max 1, `:timeout` → 2 (`reliability.test.ts:280-308`)
+40. `timeout retries are opt-in (q20)`: with the default policy `:timeout` → **1 request** (not retried); with `retry: [api_timeout_error: true]` `:timeout` then 200 → 2 requests; and `:closed` with max 1 → 2 (`reliability.test.ts:310-338`; the JS default retries timeouts, so the default case is Elixir-only)
+41. `POST timeout not retried by default`: `system_one` with `:timeout` → 1 request; with `api_timeout_error: true` → 2 (q20; JS parity absent by decision)
+42. `respect_retry_after false with zero backoff`: still 2 requests (`reliability.test.ts:362-381`)
+43. `new(retry: ...)` stores the resolved struct (`reliability.test.ts:195-199`)
+44. `invalid retry rejected at new/1 and per call`, 0 requests (`reliability.test.ts:168-180,414-421`)
+45. `req_options retry_delay, max_retries, and retry_log_level each rejected`, naming the key (new; `steps.ex:1748-1753`)
+46. `Req retry logging off`: the captured `request.options[:retry_log_level] == false` (new; §7)
+
+**Fixture and expectation changes owned by the S3b test author** (each is a fixture or default update, not a weakened assertion):
+- `error_test.exs` `build_client/2` becomes `StubAdapter.client(stub, Keyword.put_new(opts, :retry, max_retries: 0))`, and the comment at `error_test.exs:6-10` is updated. All 23 clients built through it fail with "Unknown option(s): retry" until S3b's implementation lands. Without the edit the suite measured 13.2s. The implementer must not touch it.
+- `client_test.exs` default-policy assertion (`@default_retry_policy`, `client_test.exs:8-18`, asserted at `client_test.exs:36`) flips `api_timeout_error` to `false` (operator decision q20).
+
+#### S3c — `test/typesafe/timeout_test.exs` (stubbed)
+47. `new(timeout: 250)`: `client.timeout` is 250 and the captured `receive_timeout` is 250 (`reliability.test.ts:460-474`)
+48. `per-call timeout overrides the client`, on both functions (`reliability.test.ts:493-505`)
+49. `Timeout reports the effective value`: per-call 50 with `max_retries: 0` → `%Timeout{timeout_ms: 50, message: "Request timed out after 50ms."}` (`reliability.test.ts:445-458`)
+50. `same per-attempt timeout on retry`: with `api_timeout_error: true` and zero backoff, `:timeout` then 200 → both `receive_timeout` values equal t (`reliability.test.ts:476-491`)
+51. `invalid timeout (0, -5, 1.5, nil, "x") at new/1 and per call`, 0 requests (`reliability.test.ts:524-534`)
+
+The S3c tests that could hit a timeout set `max_retries: 0` from the start.
 
 ### S4 — `test/typesafe/questions_test.exs`
 1. `noul/0 → instructions nil, no criteria key` (`client.test.ts:344,353`)
@@ -488,7 +558,7 @@ Stubbed (every client uses zero backoff):
 2. **`state: null`.** `api.md:L23` gives `string | object | array`, required. JS allows `null` (`types.ts:162`, `client.test.ts:325-335`).
 3. **Description types.** `api.md:L72-L76` types noul `true`/`false` as strings, and `api.md:L109` types choice criteria as `string | null`. `primitives/choice.md:L314` and JS (`types.ts:11,17-31`) allow string, object, or array. The docs contradict each other; the spec follows JS.
 4. **Level and option bounds.** Score takes 2 to 10 levels (`primitives/score.md:L272`) and choice takes up to 255 options (`primitives/choice.md:L355`). JS checks only `>= 2` for score (`questions.ts:82`) and nothing for choice. The Python client documents only "criteria list is empty" (`sdk/python/api/clients/sync/client.md`, system_one Raises). The spec follows JS, so upper bounds are left to the server's 422.
-5. **Error statuses.** `api.md:L314-L319` lists only 401, 422, 429, and 529. JS maps 400, 403, and 404 as well, and the live test expects a 400 `"400 Unknown model: no-such-model"` (`test/integration/api.integration.ts:116-127`).
+5. **Error statuses.** `api.md:L329-L334` lists only 401, 422, 429, and 529. JS maps 400, 403, and 404 as well, and the live test expects a 400 `"400 Unknown model: no-such-model"` (`test/integration/api.integration.ts:116-127`).
 6. **`GET /v1/models`** is documented in `models.md:L38-L83` and missing from `api.md`.
 7. **`legend` value type.** `api.md:L276` says `map<string,string>`. JS types values as the original descriptions (`types.ts:98-100`), and Python allows `str | dict | list` (`sdk/python/api/types/responses.md`, ScoreAnswer.legend).
 8. **Retry-After.** `models.md:L17` says SDKs "honor the `retry-after` header". JS also reads `retry-after-ms` (`retry.ts:38-40`).
@@ -502,13 +572,14 @@ Stubbed (every client uses zero backoff):
 
 **Unresolved from source.**
 
-13. **Timeout semantics.** JS bounds headers plus the full body per attempt (`client.ts:403-447`). Req `receive_timeout` is a socket-receive timeout (`req@0.7.4 lib/req.ex:445`), so a server that trickles its body can exceed the total. Is that acceptable, or does the port need a `Task.await`-bounded attempt?
+13. **Timeout semantics. RESOLVED (S3 plan, 2026-09-29).** JS bounds headers plus the full body per attempt (`client.ts:403-447`). Req `receive_timeout` is a socket-receive timeout (`req@0.7.4 lib/req.ex:445`), so a server that trickles its body can exceed the total. Accepted: the port keeps per-receive `receive_timeout` semantics and documents the trickle case; no `Task.await`-bounded attempt. The connect timeout is Req/Finch's default (unverified).
 14. **`User-Agent` / `X-TypeSafe-SDK` / `X-TypeSafe-Runtime` values** for the Elixir SDK. Options are `typesafe-sdk/<ex-version>` or `typesafe-sdk-ex/<version>`, and `elixir/<System.version()> (otp/<release>)`. Whether the server parses these is unknown.
-15. **Retry-After number parsing.** JS `Number()` accepts `"0x10"`, `"1e3"`, and whitespace (`retry.ts:44`). Proposal: support non-negative decimals only.
+15. **Retry-After number parsing. RESOLVED (S3 plan, 2026-09-29).** JS `Number()` accepts `"0x10"`, `"1e3"`, and whitespace (`retry.ts:44`). The port supports trimmed non-negative decimals only (§5).
 16. **Explicit empty `api_key: ""`. RESOLVED — operator decision (Gate 4 review N7).** JS accepts it, because `??` falls back only on null/undefined (`env.ts:22-23`), and then sends `Bearer `. The Elixir port does NOT mirror that: an explicit blank or whitespace-only `api_key` option (`""`, `"   "`) is rejected with the same `{:error, %TypeSafe.Error{message: m}}` (`m =~ "TYPESAFE_API_KEY"`) as a blank environment value — an explicit blank is treated identically to "not given," not as "given but empty."
 17. **Raw-body error message.** JS re-stringifies the parsed body (`errors.ts:64`); Elixir uses the original text (§6). The two differ only when the server sends non-compact JSON. Is that acceptable?
-18. **`:inets` in releases.** `:httpd_util` works in `mix`/`elixir` without starting inets (verified). Whether a release needs `:inets` in `extra_applications` to bundle it requires verification in a release build. Resolved from the earlier draft: log capture now goes through the `logger:` option (§7, verified), and the HTTP-date parser is `:httpd_util` (§5, verified).
+18. **`:inets` in releases. RESOLVED (S3 plan, 2026-09-29).** `:httpd_util` works in `mix`/`elixir` without starting inets (verified), and a release needs `:inets` in `extra_applications` to bundle it, so S3a adds it. A test-env CI run cannot detect its absence (§5). Log capture goes through the `logger:` option (§7, verified), and the HTTP-date parser is `:httpd_util` (§5, verified).
 19. **Request-tag numbering.** JS `#1` is per client. Elixir uses a VM-wide monotonic integer. Is that acceptable?
+20. **POST double-billing. RESOLVED — operator decision 2026-09-29: timeout retries are opt-in.** JS retries `POST /v1/systemone` on 5xx, 408, 429, connection errors, and timeouts, with no idempotency key (`client.ts:321-400`; `api.md:L338`). The port keeps JS parity for statuses and connection errors, but `RetryPolicy.api_timeout_error` defaults to `false` (JS: `true`, `retry.ts:22`) for every call, so a timed-out request that may already have billed is not resent. Callers opt in with `retry: [api_timeout_error: true]`. Connection errors dropped mid-response remain a smaller double-billing risk under parity; opt out with `retry: [api_connection_error: false]`. No idempotency key is invented (§5).
 
 ## 13. Integration test plan (deferred)
 
