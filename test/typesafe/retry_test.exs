@@ -29,6 +29,13 @@ defmodule TypeSafe.RetryTest do
     assert Retry.parse_retry_after(headers([{"retry-after", " 3 "}]), @now_ms) == 3000
   end
 
+  # §11 S3a #2, §5 "several values": the first value is used.
+  test "first of several header values wins" do
+    input = %{"retry-after" => ["2", "9"]}
+
+    assert Retry.parse_retry_after(input, @now_ms) == 2000
+  end
+
   # §11 S3a #3 (retry.test.ts:61-63).
   test "retry-after-ms is preferred over retry-after" do
     input = headers([{"retry-after-ms", "250"}, {"retry-after", "3"}])
@@ -55,11 +62,36 @@ defmodule TypeSafe.RetryTest do
     assert Retry.parse_retry_after(past, @now_ms) == 0
   end
 
+  # §11 S3a #5, §5 decision 4: RFC 850 and asctime, the other forms
+  # :httpd_util.convert_request_date/1 accepts (RFC 9110 §5.6.7).
+  test "RFC 850 and asctime HTTP dates are relative to the injected now" do
+    rfc850 = headers([{"retry-after", "Wednesday, 21-Oct-26 07:28:05 GMT"}])
+    asctime = headers([{"retry-after", "Wed Oct 21 07:28:05 2026"}])
+
+    assert Retry.parse_retry_after(rfc850, @now_ms) == 5000
+    assert Retry.parse_retry_after(asctime, @now_ms) == 5000
+  end
+
   # §11 S3a #6 (retry.test.ts:71-76).
   test "garbage and negative values -> nil" do
     assert Retry.parse_retry_after(headers([{"retry-after", "soon"}]), @now_ms) == nil
     assert Retry.parse_retry_after(headers([{"retry-after", "-5"}]), @now_ms) == nil
     assert Retry.parse_retry_after(headers([{"retry-after-ms", "nope"}]), @now_ms) == nil
+  end
+
+  # §11 S3a #6, §5 decision 1 (deliberate JS deviation: Number("") is 0, which
+  # would mean an immediate retry against a rate-limiting server).
+  test "blank values -> nil for both headers" do
+    for blank <- ["", "   "], name <- ["retry-after", "retry-after-ms"] do
+      assert Retry.parse_retry_after(headers([{name, blank}]), @now_ms) == nil
+    end
+  end
+
+  # §11 S3a #4 and #6, §5 decision 1: a blank ms is invalid, so it falls through.
+  test "blank retry-after-ms falls through to a valid retry-after" do
+    input = headers([{"retry-after-ms", "  "}, {"retry-after", "3"}])
+
+    assert Retry.parse_retry_after(input, @now_ms) == 3000
   end
 
   # §11 S3a #7 (new; Req accepts only an integer {:delay, _}, steps.ex:1803).
@@ -73,10 +105,26 @@ defmodule TypeSafe.RetryTest do
     assert is_integer(seconds_result)
   end
 
+  # §11 S3a #7, §5 decision 3: Kernel.round/1 rounds half away from zero.
+  test "a 2.5 tie rounds up to 3" do
+    result = Retry.parse_retry_after(headers([{"retry-after-ms", "2.5"}]), @now_ms)
+
+    assert result == 3
+    assert is_integer(result)
+  end
+
   # §11 S3a #8 (new; §12 q15 — JS Number() accepts these, retry.ts:44).
   test "non-decimal numeric forms are rejected" do
     for raw <- ["0x10", "1e3"] do
       assert Retry.parse_retry_after(headers([{"retry-after", raw}]), @now_ms) == nil
+    end
+  end
+
+  # §11 S3a #8, §5 decision 2: strict ^\d+(\.\d+)?$ after trimming. JS Number()
+  # accepts each of these (deliberate deviation).
+  test "loose decimal forms are rejected in both headers" do
+    for raw <- [".5", "5.", "+5"], name <- ["retry-after", "retry-after-ms"] do
+      assert Retry.parse_retry_after(headers([{name, raw}]), @now_ms) == nil
     end
   end
 
