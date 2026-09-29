@@ -47,7 +47,7 @@ defmodule TypeSafe.Errors do
       headers: headers,
       request_id: request_id,
       message: message,
-      retry_after_ms: retry_after_ms_from(headers)
+      retry_after_ms: TypeSafe.Retry.parse_retry_after(headers, System.os_time(:millisecond))
     }
   end
 
@@ -73,20 +73,6 @@ defmodule TypeSafe.Errors do
     case Map.get(headers, "x-typesafe-request-id", []) do
       [id | _] -> id
       [] -> nil
-    end
-  end
-
-  defp retry_after_ms_from(headers) do
-    case Map.get(headers, "retry-after", []) do
-      [value | _] -> parse_retry_after_seconds(value)
-      [] -> nil
-    end
-  end
-
-  defp parse_retry_after_seconds(value) do
-    case Integer.parse(value) do
-      {seconds, ""} when seconds >= 0 -> seconds * 1000
-      _invalid -> nil
     end
   end
 

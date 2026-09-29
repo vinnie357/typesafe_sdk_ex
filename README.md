@@ -76,10 +76,7 @@ end
 ### Known limitations
 
 - **No retries.** A 429 or 503 response returns immediately; the caller is
-  responsible for any retry loop. `Retry-After` is exposed only as
-  `TypeSafe.Error.RateLimit.retry_after_ms`, and only when the header is an
-  integer-seconds value — decimals, `retry-after-ms`, and HTTP-date values
-  are not parsed.
+  responsible for any retry loop.
 - **Fixed timeout.** Every request uses a fixed 10-second timeout; there is no
   client-level or per-call timeout option yet.
 - **No logging.**
