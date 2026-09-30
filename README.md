@@ -289,10 +289,10 @@ end
 ### Mint and Finch versions
 
 This package declares no Mint or Finch constraint, so your `mix.lock` decides
-them. Use Mint 1.10.2 or later with any Finch, or Mint 1.11.x with Finch 0.24.0
-or later, and update with `mix deps.update mint finch`. Mint 1.10.2 and 1.11.0
-carry fixes for published security advisories, and Mint 1.11.x with a Finch
-before 0.24.0 can raise on the request after a receive timeout.
+them. Use Mint 1.10.x at 1.10.2 or later with any Finch, or Mint 1.11.x with
+Finch 0.24.0 or later, and update with `mix deps.update mint finch`. Mint 1.10.2
+and 1.11.0 carry fixes for published security advisories, and Mint 1.11.x with a
+Finch before 0.24.0 can raise on the request after a receive timeout.
 
 ## Development
 
