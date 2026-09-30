@@ -28,6 +28,12 @@ mise exec -- mix test test/typesafe/client_test.exs
 Add `--max-cases 4` to reproduce the concurrency shape of a shared CI
 runner rather than a full local core count.
 
+## Design decisions
+
+Decisions and deliberate deviations from the JS SDK are recorded in
+[`docs/adr/`](docs/adr/README.md). Add or amend an ADR in the same PR as the
+change.
+
 ## Commits
 
 Use [Conventional Commits](https://www.conventionalcommits.org/)

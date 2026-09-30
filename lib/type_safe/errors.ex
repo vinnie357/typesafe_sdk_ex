@@ -1,5 +1,5 @@
 defmodule TypeSafe.Errors do
-  # Status -> struct mapping, §6 message extraction, and transport-error
+  # Status -> struct mapping, ADR 0006 message extraction, and transport-error
   # wrapping. `TypeSafe.HTTP` delegates here for every non-2xx response and
   # every transport failure. Internal implementation detail behind the
   # `TypeSafe` facade; the public surface is the `TypeSafe.Error.*` structs
@@ -8,7 +8,7 @@ defmodule TypeSafe.Errors do
 
   @max_raw_body_in_message 200
 
-  @doc "Builds the §6-mapped error struct for a non-2xx HTTP response."
+  @doc "Builds the error struct for a non-2xx HTTP response (ADR 0006)."
   @spec from_response(Req.Response.t()) :: Exception.t()
   def from_response(%Req.Response{status: status} = response) do
     decoded_body = TypeSafe.HTTP.decode_body(response)
@@ -69,7 +69,7 @@ defmodule TypeSafe.Errors do
   defp struct_for(status) when status >= 500, do: TypeSafe.Error.InternalServer
   defp struct_for(_status), do: TypeSafe.Error.API
 
-  # §6 message rules, in order: the format is "<status> <detail>", with
+  # ADR 0006 message rules, in order: the format is "<status> <detail>", with
   # `describe/3` building that string and `extract_detail/1` finding the
   # detail (errors.ts:16-37).
   defp describe(status, decoded_body, raw_body) do

@@ -151,7 +151,7 @@ defmodule TypeSafe.RetryPolicy do
   defimpl Inspect do
     @moduledoc false
 
-    # Custom rendering (spec §4, operator decision): the derived Inspect
+    # Custom rendering (ADR 0007): the derived Inspect
     # enumerates every member of the ~100-element `http_statuses` MapSet in
     # hash order, which is unreadable. All nine fields stay visible — nothing
     # is hidden — and `http_statuses` alone is summarized as compact ranges

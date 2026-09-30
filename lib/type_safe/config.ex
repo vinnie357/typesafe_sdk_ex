@@ -100,8 +100,8 @@ defmodule TypeSafe.Config do
     end
   end
 
-  # Like `validate_type/4`, but an explicit `nil` means "not given" (spec §4
-  # R1) for the four options that fall back to an env var and then a
+  # Like `validate_type/4`, but an explicit `nil` means "not given" (ADR 0004)
+  # for the four options that fall back to an env var and then a
   # default. `default_headers`, `req_options`, and `get_env` stay strict —
   # they have no env fallback, so `nil` there is still a type error.
   defp validate_nilable_type(opts, key, predicate, message) do
@@ -113,7 +113,7 @@ defmodule TypeSafe.Config do
   end
 
   # Options the SDK owns. A silent override would mislead the caller, so these
-  # are rejected by name (spec §4 R2).
+  # are rejected by name (ADR 0005).
   @rejected_req_options [
     receive_timeout: "use the client's own timeout option instead",
     request_timeout: "use the client's own timeout option instead",
@@ -125,7 +125,7 @@ defmodule TypeSafe.Config do
   defp validate_req_options_scope(opts) do
     # Validated as Req resolves it: `Req.new/1` keeps the last of a repeated
     # key (`Map.new/1`, req.ex:590-598), so a repeated key is judged by the
-    # value Req keeps (spec §4 A').
+    # value Req keeps (ADR 0005).
     req_options = opts |> Keyword.get(:req_options, []) |> Map.new()
 
     case Enum.find(@rejected_req_options, fn {key, _hint} ->
@@ -140,7 +140,7 @@ defmodule TypeSafe.Config do
   end
 
   # Req merges `finch:` request options over the top-level ones, so the
-  # timeouts are rejected there too (spec §4 R2). Req also raises on the first
+  # timeouts are rejected there too (ADR 0005). Req also raises on the first
   # request when `finch:` and `connect_options:` are both set, so that pair is
   # rejected here instead of raising later. `finch:` is a keyword list, or,
   # deprecated in Req, a pool name atom.
@@ -201,7 +201,7 @@ defmodule TypeSafe.Config do
   end
 
   @doc false
-  # Shared by `new/1` and the per-call `timeout:` option (spec §4): a positive
+  # Shared by `new/1` and the per-call `timeout:` option (ADR 0010): a positive
   # integer number of milliseconds, at most `@max_timeout`. `nil` and floats are
   # rejected; there is no env fallback.
   @spec validate_timeout(term()) :: :ok | {:error, TypeSafe.Error.t()}
@@ -333,10 +333,10 @@ defmodule TypeSafe.Config do
     end
   end
 
-  # `get_env` is caller-supplied and only checked for arity (spec §4 B5); its
+  # `get_env` is caller-supplied and only checked for arity (ADR 0004); its
   # RETURN value is unchecked, so a working 1-arity function that returns a
   # non-string, non-nil value (e.g. `fn _ -> 123 end`) must fail here rather
-  # than crash `blank_to_nil/1` downstream (spec §4 R4).
+  # than crash `blank_to_nil/1` downstream (ADR 0004).
   defp safe_env_value(get_env, env_name) do
     case get_env.(env_name) do
       nil ->
