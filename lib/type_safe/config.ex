@@ -189,7 +189,7 @@ defmodule TypeSafe.Config do
              "#{@defaults_source} must be a keyword list"
            ) do
       view = defaults |> Map.new() |> Map.merge(own)
-      validate_req_options_view(view, own)
+      validate_req_options_view(view, own, defaults)
     end
   end
 
@@ -197,7 +197,7 @@ defmodule TypeSafe.Config do
   # keys, then the finch shape and its timeouts, then the finch/connect_options
   # pair, the top-level allowlist, the finch and connect_options sub-keys, and
   # last the headers shape.
-  defp validate_req_options_view(view, own) do
+  defp validate_req_options_view(view, own, defaults) do
     finch = Map.get(view, :finch, [])
     connect_options = Map.get(view, :connect_options, [])
 
@@ -210,7 +210,7 @@ defmodule TypeSafe.Config do
          :ok <- validate_finch_name_and_pool(finch, own),
          :ok <- validate_keyword_list(view, own, :connect_options),
          :ok <- validate_sub_keys(:connect_options, connect_options, @connect_keys, own) do
-      validate_headers(Map.get(view, :headers, []), own)
+      validate_headers_entries(own, defaults)
     end
   end
 
@@ -258,11 +258,16 @@ defmodule TypeSafe.Config do
   defp validate_finch_connect_pair(view, own) do
     case Map.has_key?(view, :finch) and Map.has_key?(view, :connect_options) do
       true ->
-        scope_error(
-          own,
-          :finch,
+        message =
           "must not set both finch and connect_options; Req accepts only one of them"
-        )
+
+        case {Map.has_key?(own, :finch), Map.has_key?(own, :connect_options)} do
+          {same, same} ->
+            scope_error(own, :finch, message)
+
+          _mixed ->
+            {:error, %TypeSafe.Error{message: "req_options and #{@defaults_source} " <> message}}
+        end
 
       false ->
         :ok
@@ -304,6 +309,24 @@ defmodule TypeSafe.Config do
     else
       _no_conflict -> :ok
     end
+  end
+
+  # Req folds every `headers:` entry of `config :req, :default_options` and
+  # raises on a bad one, so each is checked unless `req_options` sets `headers:`,
+  # which replaces them all.
+  defp validate_headers_entries(own, defaults) do
+    entries =
+      case Map.fetch(own, :headers) do
+        {:ok, headers} -> [headers]
+        :error -> Keyword.get_values(defaults, :headers)
+      end
+
+    Enum.reduce_while(entries, :ok, fn headers, :ok ->
+      case validate_headers(headers, own) do
+        :ok -> {:cont, :ok}
+        {:error, %TypeSafe.Error{}} = error -> {:halt, error}
+      end
+    end)
   end
 
   # Req folds `headers:` into a header map and raises on a value it cannot

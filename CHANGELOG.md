@@ -66,8 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `authorization` header.
   - `redirect_trusted: true` sent the bearer key to a redirect host.
   - `json:` replaced the SDK's request body.
-  - `plugins:`, an unknown key, and a `headers:` value Req cannot encode raised
-    in `Req.new/1`.
+  - An invalid `plugins:` entry such as `[:x]`, an unknown key, and a
+    `headers:` value Req cannot encode raised in `Req.new/1`. A valid plugin
+    function built a client and ran caller code on the request.
   - `finch: [name: Req.Finch, pool_size: 2]` and `finch: [pool_size: 2]` raised
     on the first call; `pool_size` is not a Finch key (use `size`).
   - `finch: :unregistered_name` raised on the first call.
@@ -92,8 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `finch:` together with `connect_options:` is rejected at `new/1` instead of
   raising on the first request. Use `finch: [pool_timeout: ms]` rather than the
   deprecated top-level `pool_timeout`.
-  These checks read `req_options` as Req resolves it, where the last of a
-  repeated key wins, so `[finch: [size: 2], finch: [receive_timeout: 5]]`
+  These checks judge the last of a repeated key, the value Req keeps for a
+  non-`headers:` key, so `[finch: [size: 2], finch: [receive_timeout: 5]]`
   is rejected and `[finch: [receive_timeout: 5], finch: [size: 2]]` is
   not.
 - **Breaking:** `req_options` is a transport allowlist. `new/1` accepts only
@@ -114,11 +115,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `finch: [name: ..., <pool option>: ...]`, where the pool options are every
     `finch:` key except `name`, `pool_timeout`, and `pool_tag`;
   - `headers:` that is not a map or a list of `{name, value}` pairs with a
-    binary or atom name and a binary or list-of-binaries value.
+    binary or atom name and a binary or list-of-binaries value. An integer or
+    `DateTime` value, such as `headers: [{"x-n", 1}]`, worked before and is
+    rejected now.
+  A repeated `headers:` in `req_options` changed meaning: Req folded the
+  entries, and now only the last one is kept.
   The same allowlist checks `config :req, :default_options`, merged under
   `req_options` as Req merges it, and an error names that config as its source
-  when the offending key is not in `req_options`. The config is read when
-  `new/1` runs.
+  when the offending key is not in `req_options`. When `req_options` sets no
+  `headers:`, every `headers:` entry in the config is checked. A `finch:` and a
+  `connect_options:` from different sources give an error that names both. The
+  config is read when `new/1` runs.
 - `TypeSafe.Error.RateLimit.retry_after_ms` now parses `retry-after-ms`,
   decimal-seconds `Retry-After` values, and HTTP dates (IMF-fixdate, RFC 850,
   asctime), rounded to whole milliseconds; previously only integer seconds

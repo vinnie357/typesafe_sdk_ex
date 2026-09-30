@@ -91,12 +91,15 @@ defmodule TypeSafe do
     list with the keys `timeout`, `protocols`, `transport_opts`, `proxy`,
     `proxy_headers`, `hostname`, and `client_settings`. Keys are checked, and values are
     not, apart from the shapes stated here: a wrong-typed value such as `finch: [size: :x]`
-    or `adapter: 5` passes `new/1` and raises on the first call. `headers:` must be a map or a list of `{name, value}` pairs, a name being
-    a binary or an atom and a value a binary or a list of binaries. The check runs on the
-    options as Req resolves them: `config :req, :default_options` with `req_options`
-    merged over it, the last of a repeated key winning, so an entry in that
-    application config is validated too and an error names it as
-    `config :req, :default_options`. Use `finch: [pool_timeout: ms]` for a pool timeout
+    or `adapter: 5` passes `new/1` and raises on the first call. `headers:` must be a map
+    or a list of `{name, value}` pairs, a name being a binary or an atom and a value a
+    binary or a list of binaries; integer and `DateTime` values are rejected. The check
+    runs on `config :req, :default_options` with `req_options` merged over it: a key in
+    `req_options` replaces the config's whole value for it, and the last of a repeated key
+    wins. An entry in that application config is validated too, and an error names it as
+    `config :req, :default_options`. When `req_options` sets no `headers:`, every
+    `headers:` entry in the config is checked, because Req folds them all. The config is
+    read when `new/1` runs. Use `finch: [pool_timeout: ms]` for a pool timeout
     and `connect_options: [timeout: ms]` to bound connecting. A `finch: [name: pool]`
     that names a pool nobody started raises `ArgumentError` on the first call, a
     programming error like any other unstarted process.
@@ -117,7 +120,9 @@ defmodule TypeSafe do
 
   Every option value above is checked with a guard clause. A wrong-typed value
   or an invalid `:log_level` returns `{:error, %TypeSafe.Error{}}`, and so does a
-  `:req_options` entry outside the allowlist — `new/1` never raises on bad input.
+  `:req_options` entry outside the allowlist or with a shape stated above. `new/1` does
+  not check the values noted under `:req_options`, or a `:get_env` function that itself
+  raises, and those raise.
 
   Returns `{:ok, client}` or `{:error, %TypeSafe.Error{}}`.
   """

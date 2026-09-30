@@ -240,19 +240,20 @@ other key, such as `http_errors`, `url`, `json`, `body`, `params`, `plug`, or
   `transport_opts`, `proxy`, `proxy_headers`, `hostname`, and
   `client_settings`. It cannot be combined with `finch:`.
 - `headers:` takes a map or a list of `{name, value}` pairs. A name is a
-  binary or an atom, and a value is a binary or a list of binaries. The SDK's
+  binary or an atom, and a value is a binary or a list of binaries; integer and
+  `DateTime` values are rejected. The SDK's
   own `authorization` header wins over one you set here.
 
 `new/1` checks keys and the shapes stated above, not values: a wrong-typed value
 such as `finch: [size: :x]` or `adapter: 5` passes `new/1` and raises on the
-first call. `new/1` checks `req_options` as
-Req resolves it: Req's application config, `config :req, :default_options`,
-with `req_options` merged over it, and the last of a repeated key wins. So an
-entry in `config :req, :default_options` is validated too, and the error names
-it as `config :req, :default_options`. A key that `req_options` sets replaces the
-whole value from that config, so a `finch:` in `req_options` hides a `finch:` in
-the config, and neither is merged with the other. `new/1` reads the config when
-it runs.
+first call. The check runs on Req's application config, `config :req,
+:default_options`, with `req_options` merged over it. A key that `req_options`
+sets replaces the whole value from that config, so a `finch:` in `req_options`
+hides a `finch:` in the config, and neither is merged with the other. The last
+of a repeated key wins. An entry in `config :req, :default_options` is validated
+too, and the error names it as `config :req, :default_options`. When
+`req_options` sets no `headers:`, every `headers:` entry in the config is
+checked, because Req folds them all. `new/1` reads the config when it runs.
 
 A `finch: [name: MyApp.Finch]` that names a pool you did not start raises
 `ArgumentError` on the first call. That is a programming error, like sending a
