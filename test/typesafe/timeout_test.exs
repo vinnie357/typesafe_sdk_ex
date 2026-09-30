@@ -536,6 +536,11 @@ defmodule TypeSafe.TimeoutTest do
     test "a benign duplicate stays accepted, and Req keeps the last value" do
       assert {:ok, %{finch: [pool_size: 3]}} =
                resolved_options(finch: [pool_size: 2], finch: [pool_size: 3])
+
+      # Spec §4 A': Req keeps the last `finch:`, so a timeout in an earlier,
+      # overridden entry is not an override and must not be rejected.
+      assert {:ok, %{finch: [pool_size: 2]}} =
+               resolved_options(finch: [receive_timeout: 5], finch: [pool_size: 2])
     end
 
     test "the request the adapter sees carries no finch timeout override" do
