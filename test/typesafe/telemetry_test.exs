@@ -414,6 +414,26 @@ defmodule TypeSafe.TelemetryTest do
     refute inspect(events, limit: :infinity, printable_limit: :infinity) =~ "LETTERSONLYSECRETKEY"
   end
 
+  # Red on fe4fa5f: a value split only by a non-breaking space kept its "abcd" tail.
+  test "at :debug a default header split only by a non-breaking space is fully masked" do
+    client =
+      client(StubAdapter.respond(200, @ok_body),
+        log_level: :debug,
+        default_headers: %{"x-api-key" => "Custom#{<<0x00A0::utf8>>}abcd"}
+      )
+
+    assert {:ok, []} = list_models(client)
+
+    events = events()
+    assert [{@start, _, %{headers: headers}} | _rest] = events
+    assert %{"x-api-key" => ["***"]} = headers
+
+    all_lines = texts(events)
+    refute all_lines == []
+    refute Enum.any?(all_lines, &String.contains?(&1, "Custom"))
+    refute Enum.any?(all_lines, &String.contains?(&1, ~s("***abcd")))
+  end
+
   test "at :debug credentials in the base_url never reach the url metadata or the lines" do
     client =
       client(StubAdapter.respond(200, @ok_body),
@@ -737,6 +757,50 @@ defmodule TypeSafe.TelemetryTest do
 
       assert redact(%{"authorization" => ["Tokens abcdefghijkl"]}) ==
                %{"authorization" => ["***"]}
+    end
+
+    # Unicode whitespace counts, as in JS \s. Red on fe4fa5f: its ASCII-only \s sent
+    # these to the no-whitespace path, which kept a four-character tail (the secret).
+    test "a non-scheme word separated only by Unicode whitespace is masked with no tail" do
+      nbsp = <<0x00A0::utf8>>
+      em_space = <<0x2003::utf8>>
+      line_separator = <<0x2028::utf8>>
+
+      assert redact(%{"authorization" => ["Custom#{nbsp}abcd"]}) ==
+               %{"authorization" => ["***"]}
+
+      assert redact(%{"authorization" => ["Custom#{em_space}abcd"]}) ==
+               %{"authorization" => ["***"]}
+
+      assert redact(%{"authorization" => ["Custom#{line_separator}abcd"]}) ==
+               %{"authorization" => ["***"]}
+    end
+
+    # Red on fe4fa5f: the scheme is not recognised, so the whole value keeps a tail.
+    test "an allowed scheme separated only by Unicode whitespace is kept" do
+      nbsp = <<0x00A0::utf8>>
+      ideographic_space = <<0x3000::utf8>>
+
+      assert redact(%{"authorization" => ["Bearer#{nbsp}abcdefghijkl"]}) ==
+               %{"authorization" => ["Bearer ***ijkl"]}
+
+      assert redact(%{"authorization" => ["Token#{ideographic_space}abcdefghijkl"]}) ==
+               %{"authorization" => ["Token ***ijkl"]}
+    end
+
+    # Green controls on fe4fa5f: invalid UTF-8 must never raise and keeps the ASCII
+    # rule. A raise in the implementation fails these tests.
+    test "invalid UTF-8 with an ASCII space follows the ASCII rule and does not raise" do
+      assert redact(%{"authorization" => [<<"Bearer ", 0xFF, "abcdefghijkl">>]}) ==
+               %{"authorization" => ["Bearer ***ijkl"]}
+
+      assert redact(%{"authorization" => [<<"Custom ", 0xFF, "abcd">>]}) ==
+               %{"authorization" => ["***"]}
+    end
+
+    test "invalid UTF-8 with no whitespace follows the no-whitespace rule and does not raise" do
+      assert redact(%{"x-api-key" => [<<0xFF, "abcdefghijkl">>]}) ==
+               %{"x-api-key" => ["***ijkl"]}
     end
 
     test "every value of a multi-value header is redacted" do
