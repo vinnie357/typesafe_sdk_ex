@@ -180,4 +180,60 @@ defmodule TypeSafe.RetryTest do
   test ":inets is declared in the application spec" do
     assert :inets in Application.spec(:typesafe_sdk_ex, :applications)
   end
+
+  # Gate 4 B1 (PR #4). The grammar ^\d+(\.\d+)?$ accepts arbitrarily long
+  # digit strings. The parser returns them exact and does not cap them
+  # (S3b's max_retry_after_ms ceiling does that later). Float.parse/1 and
+  # float multiplication cannot represent these, so they must not be used.
+  @huge_ms String.to_integer(String.duplicate("9", 309))
+
+  test "oversize retry-after-ms stays an exact integer and does not raise" do
+    input = headers([{"retry-after-ms", String.duplicate("9", 309)}])
+    result = Retry.parse_retry_after(input, @now_ms)
+
+    assert result == @huge_ms
+    assert is_integer(result)
+  end
+
+  test "oversize retry-after seconds stay an exact integer and do not raise" do
+    input = headers([{"retry-after", "1" <> String.duplicate("0", 306)}])
+    result = Retry.parse_retry_after(input, @now_ms)
+
+    assert result == 10 ** 309
+    assert is_integer(result)
+  end
+
+  test "oversize retry-after seconds with a fraction are exact" do
+    input = headers([{"retry-after", String.duplicate("9", 309) <> ".5"}])
+    result = Retry.parse_retry_after(input, @now_ms)
+
+    assert result == @huge_ms * 1000 + 500
+    assert is_integer(result)
+  end
+
+  # Gate 4 B1: String.to_charlist/1 raises on invalid UTF-8.
+  test "non-UTF-8 bytes in retry-after -> nil, never a raise" do
+    assert Retry.parse_retry_after(headers([{"retry-after", <<0xFF, 0xFE>>}]), @now_ms) == nil
+  end
+
+  test "non-UTF-8 retry-after-ms falls through to a valid retry-after" do
+    input = headers([{"retry-after-ms", <<0xFF, 0xFE>>}, {"retry-after", "3"}])
+
+    assert Retry.parse_retry_after(input, @now_ms) == 3000
+  end
+
+  # Gate 4 B1 through the real error path: a 429 must stay a RateLimit struct.
+  test "Errors.from_response on a 429 with oversize or non-UTF-8 values does not raise" do
+    cases = [
+      {%{"retry-after-ms" => [String.duplicate("9", 309)]}, @huge_ms},
+      {%{"retry-after" => ["1" <> String.duplicate("0", 306)]}, 10 ** 309},
+      {%{"retry-after" => [<<0xFF, 0xFE>>]}, nil}
+    ]
+
+    for {response_headers, expected} <- cases do
+      response = %Req.Response{status: 429, headers: response_headers, body: ""}
+
+      assert %TypeSafe.Error.RateLimit{retry_after_ms: ^expected} = Errors.from_response(response)
+    end
+  end
 end
