@@ -12,6 +12,7 @@ defmodule TypeSafe.Config do
     :default_headers,
     :req_options,
     :retry,
+    :timeout,
     :get_env
   ]
 
@@ -78,6 +79,7 @@ defmodule TypeSafe.Config do
              "req_options must be a keyword list"
            ),
          :ok <- validate_req_options_scope(opts),
+         :ok <- validate_timeout_opt(opts),
          :ok <-
            validate_type(
              opts,
@@ -129,6 +131,25 @@ defmodule TypeSafe.Config do
       {key, hint} ->
         {:error, %TypeSafe.Error{message: "req_options must not set #{key}; #{hint}"}}
     end
+  end
+
+  defp validate_timeout_opt(opts) do
+    case Keyword.fetch(opts, :timeout) do
+      :error -> :ok
+      {:ok, value} -> validate_timeout(value)
+    end
+  end
+
+  @doc false
+  # Shared by `new/1` and the per-call `timeout:` option (spec §4): a positive
+  # integer number of milliseconds. `nil` and floats are rejected; there is no
+  # env fallback.
+  @spec validate_timeout(term()) :: :ok | {:error, TypeSafe.Error.t()}
+  def validate_timeout(value) when is_integer(value) and value > 0, do: :ok
+
+  def validate_timeout(value) do
+    {:error,
+     %TypeSafe.Error{message: "timeout must be a positive integer, got #{inspect(value)}"}}
   end
 
   defp validate_log_level_value(opts) do
@@ -189,7 +210,7 @@ defmodule TypeSafe.Config do
          default_model: default_model,
          log_level: log_level,
          retry: retry,
-         timeout: @default_timeout,
+         timeout: Keyword.get(opts, :timeout, @default_timeout),
          default_headers: default_headers,
          req: req
        }}

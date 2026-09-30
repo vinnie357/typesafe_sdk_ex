@@ -73,7 +73,7 @@ defmodule TypeSafe do
   - `:default_headers` — a map merged onto every request, default `%{}`.
   - `:req_options` — a keyword list merged into `Req.new/1` (e.g. `adapter:` for tests).
     `decode_body` and `retry` are SDK-owned and are always forced to `false`
-    regardless of what `req_options` requests. `receive_timeout`, `retry_delay`,
+    regardless of what `req_options` requests. `receive_timeout` (use `:timeout`), `retry_delay`,
     `max_retries`, and `retry_log_level` are rejected by name.
   - `:retry` — a keyword list of `TypeSafe.RetryPolicy` fields (`:max_retries`,
     `:backoff_initial_ms`, `:backoff_max_ms`, `:backoff_jitter`, `:http_statuses`,
@@ -81,8 +81,13 @@ defmodule TypeSafe do
     `:api_timeout_error`) overriding the defaults, which retry 408, 429, 5xx, and
     connection errors up to twice with exponential backoff. Timeouts are not
     retried unless `api_timeout_error: true`. The resolved policy is stored in
-    `client.retry`. An invalid value, an unknown key, or `nil` returns
-    `{:error, %TypeSafe.Error{}}` naming `retry.<field>`.
+    `client.retry`. An invalid value returns `{:error, %TypeSafe.Error{}}` naming
+    `retry.<field>`; `retry: nil` gives `"retry must be a keyword list, got nil"`, an unknown
+    key `"retry has unknown option(s): <keys>"`, and a repeated key
+    `"retry.<key> given more than once"`.
+  - `:timeout` — milliseconds each request attempt may wait for a response, default `10_000`.
+    Must be a positive integer; `nil` and floats are rejected, and there is no environment
+    fallback. Stored in `client.timeout`; a per-call `timeout:` overrides it.
   - `:get_env` — a `(String.t() -> String.t() | nil)` function, default `&System.get_env/1`.
 
   Every option value above is checked with a guard clause. A wrong-typed value
@@ -104,7 +109,10 @@ defmodule TypeSafe do
     list. Must be a boolean; a non-boolean value is rejected before any request is sent.
   - `:retry` — a keyword list merged field by field onto `client.retry` for this call only,
     e.g. `retry: [max_retries: 0]`. Invalid values (including `nil`) are rejected before any
-    request is sent, with an error naming `retry.<field>`.
+    request is sent, with the messages listed under `new/1`'s `:retry` option.
+  - `:timeout` — a positive integer in milliseconds that replaces `client.timeout` for this
+    call, on every attempt. It is reported as `timeout_ms` by `TypeSafe.Error.Timeout`.
+    Invalid values (including `nil`) are rejected before any request is sent.
 
   A response whose body is not `%{"models" => [...]}` returns `{:error, %TypeSafe.Error{}}`
   instead of raising.
@@ -118,7 +126,7 @@ defmodule TypeSafe do
   `TypeSafe.Error.UnprocessableEntity` (422), `TypeSafe.Error.RateLimit` (429,
   with `retry_after_ms`), `TypeSafe.Error.InternalServer` (5xx, including
   529), or `TypeSafe.Error.API` for any other non-2xx status (e.g. 409, 418).
-  A transport failure returns `TypeSafe.Error.Timeout` (the configured
+  A transport failure returns `TypeSafe.Error.Timeout` (the effective
   timeout was exceeded) or `TypeSafe.Error.Connection` (any other transport
   failure — closed socket, DNS, TLS, etc.).
 
@@ -152,7 +160,10 @@ defmodule TypeSafe do
     body. Must be a boolean; a non-boolean value is rejected before any request is sent.
   - `:retry` — a keyword list merged field by field onto `client.retry` for this call only,
     e.g. `retry: [max_retries: 0]`. Invalid values (including `nil`) are rejected before any
-    request is sent, with an error naming `retry.<field>`.
+    request is sent, with the messages listed under `new/1`'s `:retry` option.
+  - `:timeout` — a positive integer in milliseconds that replaces `client.timeout` for this
+    call, on every attempt. It is reported as `timeout_ms` by `TypeSafe.Error.Timeout`.
+    Invalid values (including `nil`) are rejected before any request is sent.
 
   Retryable failures are retried per the client's retry policy, and each retry sends the same
   request body. A timeout is not retried by default: a timed-out request may already have been
@@ -165,7 +176,7 @@ defmodule TypeSafe do
   `TypeSafe.Error.UnprocessableEntity` (422), `TypeSafe.Error.RateLimit` (429,
   with `retry_after_ms`), `TypeSafe.Error.InternalServer` (5xx, including
   529), or `TypeSafe.Error.API` for any other non-2xx status (e.g. 409, 418).
-  A transport failure returns `TypeSafe.Error.Timeout` (the configured
+  A transport failure returns `TypeSafe.Error.Timeout` (the effective
   timeout was exceeded) or `TypeSafe.Error.Connection` (any other transport
   failure — closed socket, DNS, TLS, etc.).
 
