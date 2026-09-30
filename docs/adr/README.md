@@ -13,7 +13,7 @@ Each ADR documents behavior the code has today. Where a decision has a known gap
 | [0001](0001-port-js-sdk-as-reference.md) | Port the JS SDK v0.6.0 as the behavioral reference | Accepted | 2026-09-17; re-verified 2026-09-29 |
 | [0002](0002-runtime-dependency-is-req-only.md) | Runtime dependency is Req only | Accepted | 2026-09-17; amended 2026-09-29 |
 | [0003](0003-public-api-facade-and-tagged-tuples.md) | Public API is a facade returning tagged tuples | Accepted | 2026-09-17 |
-| [0004](0004-configuration-resolution-and-option-validation.md) | Configuration resolution and option validation | Accepted | 2026-09-17 |
+| [0004](0004-configuration-resolution-and-option-validation.md) | Configuration resolution and option validation | Accepted; decision 7 has a known implementation gap (#10) | 2026-09-17 |
 | [0005](0005-sdk-owned-request-settings-headers-and-body-decoding.md) | SDK-owned request settings, headers, and body decoding | Accepted | 2026-09-17; amended 2026-09-29 |
 | [0006](0006-error-taxonomy.md) | Error taxonomy | Accepted | 2026-09-17 |
 | [0007](0007-retry-policy-and-engine-on-req-retry.md) | Retry policy and engine on Req's `:retry` | Accepted | 2026-09-29 |
