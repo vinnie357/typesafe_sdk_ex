@@ -49,11 +49,11 @@ Left on, that default retried a `GET /v1/models` 503 four times over about 6.7 s
 14. `decide/2` returns `false` for any 2xx response, even when `http_statuses` lists it.
 15. For another response, `decide/2` retries when the status is in `http_statuses`.
 16. For an exception, `decide/2` follows `api_timeout_error` when it is `%Req.TransportError{reason: :timeout}`, and `api_connection_error` for any other exception (`client.ts:150-154,383-384`).
-17. `decide/2` reads the attempt number from `:req_retry_count` and returns `false` once it reaches `max_retries`. Req still calls the retry function when retries run out (`steps.ex:1808-1813`), so the check is required. After retries run out, the SDK returns the last error.
+17. `decide/2` reads the attempt number from `:req_retry_count` and returns `false` once it reaches `max_retries`. Req calls the retry function even when retries have run out, but its own `do_retry` gates on `retry_count < max_retries` and returns the response or exception unchanged (`req@0.7.4 lib/req/steps.ex:1807-1822`), so Req stops without the check. The check keeps `decide/2` from reporting a retry that will not happen; it matters once a logger reads that result, and logging is not built. After retries run out, the SDK returns the last error.
 18. The delay is one of two values. When `respect_retry_after` is set, the response has headers, and the parsed Retry-After is not `nil` and is at most `max_retry_after_ms`, the delay is that value exactly, with no jitter. Otherwise the delay is `round(min(backoff_initial_ms * 2^attempt, backoff_max_ms) * (1 - random * backoff_jitter))`, with `random` in `[0, 1)` (`retry.ts:56-68`). Transport errors have no headers and always use backoff.
 19. The ceiling applies on the delay path. `delay_ms/4`, and `decide/2` through it, fall back to backoff when the parsed value exceeds `max_retry_after_ms`. No value handed to Req exceeds `max(max_retry_after_ms, backoff_max_ms)`. The parser itself returns uncapped values (ADR 0009).
 20. A request step sets `x-typesafe-retry-count` from Req's private retry counter on every attempt (ADR 0005).
-21. The SDK adds no sleep injection, no idempotency key, and no total retry budget. Req calls `Process.sleep/1` directly (`steps.ex:1815`), and a `{:delay, 0}` still calls `Process.sleep(0)`.
+21. The SDK adds no sleep injection and no total retry budget. It sends no idempotency key (ADR 0008). Req calls `Process.sleep/1` directly (`steps.ex:1815`), and a `{:delay, 0}` still calls `Process.sleep(0)`.
 22. The SDK does not port the Python retry `exceptions` and `predicate` options. JS rejects them at the type level (`test/types.test-d.ts:132-133`).
 
 ## Consequences
@@ -82,7 +82,7 @@ Left on, that default retried a `GET /v1/models` 503 four times over about 6.7 s
 ## References
 
 - JS: `src/retry.ts:11-23,56-68`, `src/types.ts:175-194` (the `RetryPolicy` type), `src/client.ts:70-84,102-147,150-154,337,364-400,383-385`, `test/retry.test.ts:38-125`, `test/reliability.test.ts:51-166,195-199,383-421`, `test/types.test-d.ts:132-133`.
-- Req 0.7.4: `lib/req/steps.ex:1670-1700,1704,1720-1722,1748-1753,1775,1803-1815,1808-1817,1824-1840`, `lib/req/request.ex:1032-1050`.
+- Req 0.7.4: `lib/req/steps.ex:1670-1700,1704,1720-1722,1748-1753,1775,1803-1815,1807-1822,1808-1817,1824-1840`, `lib/req/request.ex:1032-1050`.
 - This repository: `lib/type_safe/retry.ex:53,61-66,103` (clock read, exact rounding, jitter), `lib/type_safe/retry_policy.ex`.
 - PR #1 review round 1, finding B2 (Req's default retry ran): https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5714770534
 - PR #1 review round 3, finding D4 (bracketed `http_statuses` in `inspect`): https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5722393470

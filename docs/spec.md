@@ -1,6 +1,6 @@
 # TypeSafe SDK port spec (superseded)
 
-Split into ADRs on 2026-09-29. Decisions live in [`docs/adr/`](adr/README.md). This file only resolves legacy references (`§5`, `q20`, `§11 S3b #18`) in source and test comments. It carries no decision text.
+Split into ADRs on 2026-09-29. Decisions live in [`docs/adr/`](adr/README.md). This file only resolves legacy references (`§5`, `q20`, `§11 S3b #18`) in source and test comments. It carries no decision text. Test comments that cite spec line numbers (for example `spec §3 L55`) refer to earlier spec revisions: read those at commit `a935ea1` (`git show a935ea1:docs/spec.md`).
 
 Last full spec, for material that has no ADR (logging, the slice plan and acceptance criteria, the ordered test list, the live-API test plan): https://github.com/vinnie357/typesafe_sdk_ex/blob/e83f7a28c126f6f9ead2fb14bf8edcd3a9efd4c4/docs/spec.md
 

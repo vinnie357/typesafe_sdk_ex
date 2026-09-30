@@ -37,7 +37,7 @@ The JS SDK maps each non-2xx status to an `APIError` subclass, wraps transport f
    6. `detail.message`
    7. `detail` is a list: each entry's `loc`, minus `"body"`, joined with `.`, then `: msg`, entries joined with `"; "`
 9. With no extracted detail and a `nil` body, the message is `"<status> status code (no body)"`.
-10. With no extracted detail and a body, the message is the original body text, cut to 200 characters plus `…` (`errors.ts:60-66`).
+10. With no extracted detail and a body, the message is the original body text, cut to 200 characters plus `…` (`errors.ts:60-66`). A non-binary body from a custom adapter has no original text, so the SDK uses its `inspect/1` form.
 11. Decision 10 deviates from JS, which re-stringifies the parsed body. Stdlib `JSON` offers only bang encoders (`JSON.encode!/1`, `JSON.encode_to_iodata!/1`), so the SDK avoids re-encoding. The message equals JS output when the server sends compact JSON, as in `test/errors.test.ts:91-95`. For `{ "code" : 7 }` it keeps the spacing.
 
 ## Consequences
@@ -49,7 +49,7 @@ The JS SDK maps each non-2xx status to an `APIError` subclass, wraps transport f
 
 ### Negative
 
-- Two message gaps against JS exist and no test pins them. An empty-string `error`, `message`, or `detail` value yields the message `"<status> "`, where JS falls through to the raw-body form because an empty detail is falsy. A JSON `null` body reads as no body, where JS reports `"<status> null"`.
+- Three gaps exist and issue #10 tracks them (https://github.com/vinnie357/typesafe_sdk_ex/issues/10). The first two are message gaps against JS that no test pins. An empty-string `error`, `message`, or `detail` value yields the message `"<status> "`, where JS falls through to the raw-body form because an empty detail is falsy. A JSON `null` body reads as no body, where JS reports `"<status> null"`.
 - Code cannot match all SDK errors with one struct pattern, only on the tuple.
 - The public `TypeSafe.Error.Timeout` moduledoc is stale. It says `timeout_ms` is `client.timeout` "until ... a per-call override" lands, and that the full response did not arrive. The per-call override exists, and the value bounds each socket read (ADR 0010).
 

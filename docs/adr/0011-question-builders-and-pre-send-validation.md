@@ -23,6 +23,8 @@ The docs and the JS types disagree on required fields and bounds (ADR 0001).
    | `choice(i, criteria_map)` | `%{type: "choice", instructions: i, criteria: criteria_map}` |
    | `score(i, criteria_list)` | `%{type: "score", instructions: i, criteria: criteria_list}` |
 
+   `noul/2` has no guard on `c`. Its typespec says `map() | nil`, but the builder forwards any term, so `noul("i", "str")` and `noul("i", [1])` return maps with that value as `criteria`. JS types `criteria` in TypeScript only (`questions.ts:19-27`) and adds no runtime check. Issue #10 tracks the gap: https://github.com/vinnie357/typesafe_sdk_ex/issues/10
+
 2. `choice/2` requires a map and `score/2` requires a list. Guard clauses enforce it, and a wrong container raises `FunctionClauseError`. This is a programmer error, and it deviates from JS, which throws `TypeSafeError` with a message (`questions.ts:41-45,59-61`).
 3. The builders pass criteria through without rewriting them.
 4. Instructions and descriptions accept any JSON term, including `nil`. The SDK does not validate `instructions` (ADR 0001).
@@ -71,6 +73,6 @@ The docs and the JS types disagree on required fields and bounds (ADR 0001).
 
 ## References
 
-- JS: `src/questions.ts:22-63,70-89`, `src/client.ts:311-325`, `src/types.ts:155-172` (the request payload), `test/client.test.ts:236,279` (`noul` without criteria), `test/client.test.ts:262-322,324-395`.
+- JS: `src/questions.ts:22-63,70-89`, `src/client.ts:311-325`, `src/types.ts:155-172` (the request payload), `test/client.test.ts:278-279` (`noul` without criteria), `test/client.test.ts:262-322,324-395`.
 - PR #1 review round 1, findings B3, B4, N5: https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5714770534
 - PR #1 review round 2, finding R5 and the note on question keys: https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5715301129

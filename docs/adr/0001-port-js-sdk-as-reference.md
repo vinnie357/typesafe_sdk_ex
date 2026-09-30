@@ -42,14 +42,16 @@ On 2026-09-29 the JS repository was identical to the pinned commit: the GitHub c
 |---|---|
 | Constructor and validation failures return `{:error, _}` instead of throwing | ADR 0003 |
 | `system_one/3` requires an atom-keyed request with `:state`; JS drops `state: undefined` | ADR 0011 |
-| An explicit blank `api_key` counts as not given; JS sends `Bearer ` | ADR 0004 |
+| An explicit blank `api_key` is an error per the operator ruling, and the code falls back to the env key (open, issue #10); JS sends `Bearer ` | ADR 0004 |
 | An unrecognized `TYPESAFE_LOG_LEVEL` falls back to `:warning`; JS throws | ADR 0004 |
+| The `log_level` option takes atoms only; JS takes the strings | ADR 0004 |
 | `User-Agent`, `X-TypeSafe-SDK`, and `X-TypeSafe-Runtime` carry Elixir values | ADR 0005 |
 | `req_options` cannot override SDK-owned settings; the header surface is a one-value map | ADR 0005 |
 | Raw-body error messages use the original body text; the `Timeout` struct is separate from `Connection` | ADR 0006 |
 | Millisecond retry fields are integers | ADR 0007 |
 | `api_timeout_error` defaults to `false` | ADR 0008 |
 | Retry-After grammar is strict, blank is `nil`, the first header value wins, results are integers | ADR 0009 |
+| A Retry-After HTTP date ignores its timezone token and reads as UTC | ADR 0009 |
 | `timeout` is a positive integer with an upper bound and bounds each socket read, not connecting | ADR 0010 |
 | Builders raise `FunctionClauseError` instead of throwing `TypeSafeError` | ADR 0011 |
 

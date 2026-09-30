@@ -27,6 +27,7 @@ Each ADR documents behavior the code has today. Where a decision has a known gap
 
 - Hardening `req_options` (ADR 0005): https://github.com/vinnie357/typesafe_sdk_ex/issues/7
 - The v0.2.0 release gate, including the README audit: https://github.com/vinnie357/typesafe_sdk_ex/issues/8
+- Gaps found while writing the ADRs (empty-string error fields, JSON `null` error body, stale `Timeout` moduledoc, blank `api_key` fall-through, non-keyword call options that raise; ADRs 0003, 0004, 0006, 0011): https://github.com/vinnie357/typesafe_sdk_ex/issues/10
 
 ## Citation conventions
 

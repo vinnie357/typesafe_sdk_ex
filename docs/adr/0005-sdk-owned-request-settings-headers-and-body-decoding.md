@@ -48,7 +48,7 @@ Req decodes bodies by content-type (`req@0.7.4 lib/req/steps.ex:1163-1176`), so 
     | `x-typesafe-retry-count` | Absent on attempt 0, then `"1"`, `"2"`, and so on. The SDK removes a caller's value on every attempt. |
 
 13. The header surface is a one-value-per-name map. A value is a binary, an atom, a number, or `nil`. The SDK converts atoms and numbers with `to_string/1`. A list value is rejected. The `headers` and `default_headers` containers must be maps.
-14. The SDK sends no idempotency header and no `x-should-retry` header. The JS SDK sends none either.
+14. The SDK sends no header beyond the table above. ADR 0008 records the absence of an idempotency header.
 15. The SDK reads three response headers: `x-typesafe-request-id`, `retry-after-ms`, and `retry-after`.
 
 ### Body decoding

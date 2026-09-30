@@ -16,7 +16,7 @@ Several JS features tempt a dependency (see the table under Decision). Each has 
 3. The SDK uses the substitutes in the table below.
 4. `:inets` is listed in `extra_applications`, so a release bundles `:httpd_util`.
 5. `mix.exs` declares no `mint` or `finch` constraint.
-6. The CHANGELOG records the safe Mint and Finch combinations for consumers: Mint 1.10.2 or later with any Finch, or Mint 1.11.x with Finch 0.24.0 or later. Consumers run `mix deps.update mint finch`.
+6. The CHANGELOG records the safe Mint and Finch combinations for consumers: Mint 1.10.x at 1.10.2 or later with any Finch, or Mint 1.11.x with Finch 0.24.0 or later. Mint 1.11.x with Finch 0.23.x is not safe: it can raise on the request after a receive timeout. Consumers run `mix deps.update mint finch`. `CHANGELOG.md` states this pairing; the README carries no note yet (issue #8).
 7. Docs stay as `@moduledoc` and `@doc`. The SDK adds no `ex_doc` dependency.
 
 | Concern | Mechanism |
