@@ -7,26 +7,31 @@ defmodule TypeSafe.HTTP do
 
   @doc """
   Builds the base `Req.Request` for a client: `base_url` plus `req_options`
-  merged in, then the SDK-owned settings forced back on top (ADR 0005; known gaps: issue #7) —
-  `base_url` and `decode_body: false`/`retry: false` are forced to the
-  client's own values, and a caller-supplied `:auth` is dropped so Req's
-  built-in `:auth` step can never overwrite the `authorization` header we
-  set below. `receive_timeout`, `retry_delay`, `max_retries`, and
-  `retry_log_level` are rejected earlier, at `TypeSafe.Config` validation
-  time, so they never reach here. The retry options are set per call instead. Used by `TypeSafe.Config.build/1`.
+  (ADR 0005), then the SDK-owned settings forced back on top — `base_url` and
+  `decode_body: false`/`retry: false` are the client's own values, and `:auth`
+  is dropped so Req's built-in `:auth` step can never overwrite the
+  `authorization` header we set below. `req_options` was checked against the
+  transport allowlist earlier, at `TypeSafe.Config` validation time, so
+  `receive_timeout`, `retry_delay`, `max_retries`, `retry_log_level`, and every
+  option outside the allowlist never reach here. The retry options are set per
+  call instead. Used by `TypeSafe.Config.build/1`.
   """
   @spec new_client_req(String.t(), keyword(), String.t()) :: Req.Request.t()
   def new_client_req(base_url, req_options, api_key) do
+    # Deduplicated, last-wins: the view `TypeSafe.Config` validated. Req folds a
+    # repeated `headers:` entry and raises on a bad earlier one.
     req_config =
-      [base_url: base_url]
-      |> Keyword.merge(req_options)
-      |> Keyword.delete(:auth)
-      |> Keyword.put(:base_url, base_url)
-      |> Keyword.put(:decode_body, false)
-      |> Keyword.put(:retry, false)
+      req_options
+      |> Map.new()
+      |> Map.merge(%{base_url: base_url, decode_body: false, retry: false})
+      |> Map.delete(:auth)
+      |> Map.to_list()
 
-    req_config
-    |> Req.new()
+    # `Req.new/1` merges `config :req, :default_options` itself, which can
+    # carry an `:auth` of its own, so it is removed from the built request too.
+    req = Req.new(req_config)
+
+    %{req | options: Map.delete(req.options, :auth)}
     |> Req.Request.put_header("authorization", "Bearer " <> api_key)
   end
 

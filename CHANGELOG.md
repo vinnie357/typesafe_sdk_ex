@@ -58,6 +58,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A repeated option key in `TypeSafe.new/1`, `TypeSafe.system_one/3`, or
   `TypeSafe.list_models/2` returns `<key> given more than once` instead of
   `Unknown option(s): <key>`.
+- `TypeSafe.new/1` and calls no longer raise, or send what the SDK did not
+  intend, for these `req_options`, each now an `{:error, %TypeSafe.Error{}}` from
+  `new/1`:
+  - `http_errors: :raise` made a non-2xx response raise `RuntimeError`.
+  - `url: "http://user:pass@host"` and `aws_sigv4:` replaced the bearer
+    `authorization` header.
+  - `redirect_trusted: true` sent the bearer key to a redirect host.
+  - `json:` replaced the SDK's request body.
+  - `plugins:`, an unknown key, and a `headers:` value Req cannot encode raised
+    in `Req.new/1`.
+  - `finch: [name: Req.Finch, pool_size: 2]` and `finch: [pool_size: 2]` raised
+    on the first call; `pool_size` is not a Finch key (use `size`).
+  - `finch: :unregistered_name` raised on the first call.
+  - An `auth` in `config :req, :default_options` no longer reaches the request,
+    and a `finch: [receive_timeout: ...]` there no longer overrides `timeout:`.
+  A `finch: [name: X]` for a pool nobody started, and a wrong-typed value such
+  as `finch: [size: :x]`, still raise on the first call.
 
 ### Changed
 
@@ -76,9 +93,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   raising on the first request. Use `finch: [pool_timeout: ms]` rather than the
   deprecated top-level `pool_timeout`.
   These checks read `req_options` as Req resolves it, where the last of a
-  repeated key wins, so `[finch: [pool_size: 2], finch: [receive_timeout: 5]]`
-  is rejected and `[finch: [receive_timeout: 5], finch: [pool_size: 2]]` is
+  repeated key wins, so `[finch: [size: 2], finch: [receive_timeout: 5]]`
+  is rejected and `[finch: [receive_timeout: 5], finch: [size: 2]]` is
   not.
+- **Breaking:** `req_options` is a transport allowlist. `new/1` accepts only
+  `adapter`, `connect_options`, `finch`, `finch_private`, `headers`, `inet6`,
+  and `unix_socket`, plus `base_url`, `decode_body`, `retry`, and `auth`, which
+  the SDK overrides. `finch:` takes only `name`, `pool_timeout`, `pool_tag`,
+  `size`, `count`, `protocols`, `conn_opts`, `pool_max_idle_time`,
+  `conn_max_idle_time`, `start_pool_metrics?`, and `http2`; `connect_options:`
+  takes only `timeout`, `protocols`, `transport_opts`, `proxy`,
+  `proxy_headers`, `hostname`, and `client_settings`. Keys are checked, not
+  values. `new/1` now returns `{:error, %TypeSafe.Error{}}` for input it used
+  to accept:
+  - any other key, such as `params`, `redirect`, `http_errors`, `url`, `json`,
+    `body`, `plug`, or `plugins`, and a top-level `pool_timeout`, `size`, or
+    `pool_size`;
+  - `finch:` as a pool name atom (write `finch: [name: pool]`) or as a
+    non-keyword value, a `connect_options:` that is not a keyword list, and
+    `finch: [name: ..., <pool option>: ...]`, where the pool options are every
+    `finch:` key except `name`, `pool_timeout`, and `pool_tag`;
+  - `headers:` that is not a map or a list of `{name, value}` pairs with a
+    binary or atom name and a binary or list-of-binaries value.
+  The same allowlist checks `config :req, :default_options`, merged under
+  `req_options` as Req merges it, and an error names that config as its source
+  when the offending key is not in `req_options`. The config is read when
+  `new/1` runs.
 - `TypeSafe.Error.RateLimit.retry_after_ms` now parses `retry-after-ms`,
   decimal-seconds `Retry-After` values, and HTTP dates (IMF-fixdate, RFC 850,
   asctime), rounded to whole milliseconds; previously only integer seconds

@@ -1,7 +1,7 @@
 # ADR 0012: Test seams without mocking libraries
 
 **Status:** Accepted
-**Date:** 2026-09-17; amended 2026-09-29 (the real-socket test)
+**Date:** 2026-09-17; amended 2026-09-29 (the real-socket test); amended 2026-09-30 (`config :req, :default_options` test module)
 
 ## Context
 
@@ -15,7 +15,7 @@ The JS suite injects a `mockFetch` and fake timers (`test/helpers.ts:10-21`, `te
 4. The closure lives in the request's private map. No global or process-dictionary state exists, so the stub is safe under `async: true`, and it survives retries, which reuse the same request struct (`lib/req/steps.ex:1816-1817`).
 5. A stub returns `{request, %Req.Response{}}`, or `{request, %Req.TransportError{reason: reason}}` for a transport failure. A stateful sequence such as `[503, 503, 200]` comes from an `Agent` started with `start_supervised`. A stub reports each request to the test process with `send/2`, and tests use `assert_received` and `refute_received`.
 6. The adapter runs inside Req's retry loop, so stubbed tests exercise real Req retries. The adapter runs at the end of `run_request` (`lib/req/request.ex:1052-1063`). A response flows to the response steps, where `retry` runs first (`lib/req/steps.ex:87`). An exception flows to the error steps (`lib/req/request.ex:1090-1105`), which also start with `retry` (`lib/req/steps.ex:95`). Req then calls `run_request/1` again (`lib/req/steps.ex:1817`), which re-runs the request steps and the adapter.
-7. Tests inject the environment through `new(get_env: fn name -> Map.get(env, name) end)`. They never call `System.put_env` or `Application.put_env`.
+7. Tests inject the environment through `new(get_env: fn name -> Map.get(env, name) end)`. They never call `System.put_env`. They do not call `Application.put_env` either, with one exception: Req reads `config :req, :default_options` from the application env and has no per-call injection, so `test/typesafe/req_default_options_test.exs` sets it. That module is `async: false`, saves the previous value in `setup`, and restores it in `on_exit` (ADR 0005 decision 10).
 8. `TypeSafe.Retry.delay_ms/4` and `TypeSafe.Retry.parse_retry_after/2` are pure. Tests pass the clock and the random function. `decide/2` is not pure (ADR 0007), so its tests use zero jitter and no HTTP-date header.
 9. End-to-end retry tests use zero delay: `retry: [backoff_initial_ms: 0, backoff_max_ms: 0]`, `retry-after-ms: 0`, or `respect_retry_after: false` with zero backoff. `Process.sleep(0)` returns at once.
 10. The SDK adds no `:sleep` option. Req calls `Process.sleep/1` directly (`lib/req/steps.ex:1815`).

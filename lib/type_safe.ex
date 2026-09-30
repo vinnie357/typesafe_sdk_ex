@@ -77,12 +77,29 @@ defmodule TypeSafe do
   - `:default_model` — default `jev-latest`. Must be a string.
   - `:log_level` — one of `t:log_level/0`, default `:warning`.
   - `:default_headers` — a map merged onto every request, default `%{}`.
-  - `:req_options` — a keyword list merged into `Req.new/1` (e.g. `adapter:` for tests).
-    `decode_body` and `retry` are SDK-owned and are always forced to `false`
-    regardless of what `req_options` requests. `receive_timeout` and `request_timeout` (also under `finch:`; use `:timeout`), `retry_delay`,
-    `max_retries`, and `retry_log_level` are rejected by name. `finch:` together with
-    `connect_options:` is rejected. Use `finch: [pool_timeout: ms]` for a pool timeout and
-    `connect_options: [timeout: ms]` to bound connecting.
+  - `:req_options` — a keyword list of transport options for `Req.new/1`. Only these
+    top-level keys are supported: `adapter`, `connect_options`, `finch`, `finch_private`,
+    `headers`, `inet6`, and `unix_socket`. `base_url`, `decode_body`, `retry`, and `auth` are
+    accepted but SDK-owned: the SDK always sets `base_url` to the client's, forces
+    `decode_body: false` and `retry: false`, and drops `auth`. Any other key is an
+    error, as are `receive_timeout`, `request_timeout` (also under `finch:`; use `:timeout`),
+    `retry_delay`, `max_retries`, and `retry_log_level`. `finch:` must be a keyword list
+    with the keys `name`, `pool_timeout`, `pool_tag`, `size`, `count`, `protocols`,
+    `conn_opts`, `pool_max_idle_time`, `conn_max_idle_time`, `start_pool_metrics?`, and
+    `http2`; `name:` cannot go with a pool key other than `pool_timeout` and `pool_tag`,
+    and `finch:` cannot go with `connect_options:`. `connect_options:` must be a keyword
+    list with the keys `timeout`, `protocols`, `transport_opts`, `proxy`,
+    `proxy_headers`, `hostname`, and `client_settings`. Keys are checked, and values are
+    not, apart from the shapes stated here: a wrong-typed value such as `finch: [size: :x]`
+    or `adapter: 5` passes `new/1` and raises on the first call. `headers:` must be a map or a list of `{name, value}` pairs, a name being
+    a binary or an atom and a value a binary or a list of binaries. The check runs on the
+    options as Req resolves them: `config :req, :default_options` with `req_options`
+    merged over it, the last of a repeated key winning, so an entry in that
+    application config is validated too and an error names it as
+    `config :req, :default_options`. Use `finch: [pool_timeout: ms]` for a pool timeout
+    and `connect_options: [timeout: ms]` to bound connecting. A `finch: [name: pool]`
+    that names a pool nobody started raises `ArgumentError` on the first call, a
+    programming error like any other unstarted process.
   - `:retry` — a keyword list of `TypeSafe.RetryPolicy` fields (`:max_retries`,
     `:backoff_initial_ms`, `:backoff_max_ms`, `:backoff_jitter`, `:http_statuses`,
     `:respect_retry_after`, `:max_retry_after_ms`, `:api_connection_error`,
@@ -99,8 +116,8 @@ defmodule TypeSafe do
   - `:get_env` — a `(String.t() -> String.t() | nil)` function, default `&System.get_env/1`.
 
   Every option value above is checked with a guard clause. A wrong-typed value
-  or an invalid `:log_level` returns `{:error, %TypeSafe.Error{}}` — `new/1`
-  never raises on bad input.
+  or an invalid `:log_level` returns `{:error, %TypeSafe.Error{}}`, and so does a
+  `:req_options` entry outside the allowlist — `new/1` never raises on bad input.
 
   Returns `{:ok, client}` or `{:error, %TypeSafe.Error{}}`.
   """
