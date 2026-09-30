@@ -45,7 +45,7 @@ The JS SDK exposes a `TypeSafeClient` class, a lazy `APIPromise`, and a `Models`
 
 ### Negative
 
-- The `new/1` doc claims it "never raises on bad input", which is broader than the built behavior. The paths in decision 6 raise, and they are by design (decisions 6 and 16). The `req_options` allowlist (ADR 0005) returns an error for every unsupported key, and the checks read keys and shapes, not values.
+- The `new/1` doc no longer claims it never raises. It says `new/1` "does not check the values noted under `:req_options`, or a `:get_env` function that itself raises, and those raise". Those are the paths in decision 6, and they are by design (decisions 6 and 16). The `req_options` allowlist (ADR 0005) returns an error for every unsupported key and stated shape, and the checks read keys and shapes, not values.
 - Callers get maps, not structs, so a typo in a key returns `nil` and no compile-time error. The SDK trades that for a smaller surface and no response validation.
 - A `system_one/3` call with a `nil` request raises `FunctionClauseError`. The first PR review accepted this as a caller error outside the documented contract.
 

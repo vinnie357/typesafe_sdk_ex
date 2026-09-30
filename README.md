@@ -241,8 +241,8 @@ other key, such as `http_errors`, `url`, `json`, `body`, `params`, `plug`, or
   `client_settings`. It cannot be combined with `finch:`.
 - `headers:` takes a map or a list of `{name, value}` pairs. A name is a
   binary or an atom, and a value is a binary or a list of binaries; integer and
-  `DateTime` values are rejected. The SDK's
-  own `authorization` header wins over one you set here.
+  `DateTime` values are rejected. The SDK's own `authorization` header wins over
+  one you set here.
 
 `new/1` checks keys and the shapes stated above, not values: a wrong-typed value
 such as `finch: [size: :x]` or `adapter: 5` passes `new/1` and raises on the
