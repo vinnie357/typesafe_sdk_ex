@@ -73,8 +73,10 @@ defmodule TypeSafe do
   - `:default_headers` — a map merged onto every request, default `%{}`.
   - `:req_options` — a keyword list merged into `Req.new/1` (e.g. `adapter:` for tests).
     `decode_body` and `retry` are SDK-owned and are always forced to `false`
-    regardless of what `req_options` requests. `receive_timeout` (use `:timeout`), `retry_delay`,
-    `max_retries`, and `retry_log_level` are rejected by name.
+    regardless of what `req_options` requests. `receive_timeout` and `request_timeout` (also under `finch:`; use `:timeout`), `retry_delay`,
+    `max_retries`, and `retry_log_level` are rejected by name. `finch:` together with
+    `connect_options:` is rejected. Use `finch: [pool_timeout: ms]` for a pool timeout and
+    `connect_options: [timeout: ms]` to bound connecting.
   - `:retry` — a keyword list of `TypeSafe.RetryPolicy` fields (`:max_retries`,
     `:backoff_initial_ms`, `:backoff_max_ms`, `:backoff_jitter`, `:http_statuses`,
     `:respect_retry_after`, `:max_retry_after_ms`, `:api_connection_error`,
@@ -86,7 +88,7 @@ defmodule TypeSafe do
     key `"retry has unknown option(s): <keys>"`, and a repeated key
     `"retry.<key> given more than once"`.
   - `:timeout` — milliseconds each request attempt may wait for a response, default `10_000`.
-    Must be a positive integer; `nil` and floats are rejected, and there is no environment
+    Must be a positive integer, at most `4_294_967_295`; `nil` and floats are rejected, and there is no environment
     fallback. Stored in `client.timeout`; a per-call `timeout:` overrides it.
   - `:get_env` — a `(String.t() -> String.t() | nil)` function, default `&System.get_env/1`.
 
@@ -111,8 +113,11 @@ defmodule TypeSafe do
     e.g. `retry: [max_retries: 0]`. Invalid values (including `nil`) are rejected before any
     request is sent, with the messages listed under `new/1`'s `:retry` option.
   - `:timeout` — a positive integer in milliseconds that replaces `client.timeout` for this
-    call, on every attempt. It is reported as `timeout_ms` by `TypeSafe.Error.Timeout`.
-    Invalid values (including `nil`) are rejected before any request is sent.
+    call, on every attempt. It bounds each socket read, not connecting: connecting uses Finch's
+    5_000 ms default, set with `req_options: [connect_options: [timeout: ms]]` on `new/1`.
+    `TypeSafe.Error.Timeout.timeout_ms` is this configured per-read value, not the elapsed
+    time, so a connect timeout reports it too. Invalid values (including `nil`) are rejected
+    before any request is sent.
 
   A response whose body is not `%{"models" => [...]}` returns `{:error, %TypeSafe.Error{}}`
   instead of raising.
@@ -162,8 +167,11 @@ defmodule TypeSafe do
     e.g. `retry: [max_retries: 0]`. Invalid values (including `nil`) are rejected before any
     request is sent, with the messages listed under `new/1`'s `:retry` option.
   - `:timeout` — a positive integer in milliseconds that replaces `client.timeout` for this
-    call, on every attempt. It is reported as `timeout_ms` by `TypeSafe.Error.Timeout`.
-    Invalid values (including `nil`) are rejected before any request is sent.
+    call, on every attempt. It bounds each socket read, not connecting: connecting uses Finch's
+    5_000 ms default, set with `req_options: [connect_options: [timeout: ms]]` on `new/1`.
+    `TypeSafe.Error.Timeout.timeout_ms` is this configured per-read value, not the elapsed
+    time, so a connect timeout reports it too. Invalid values (including `nil`) are rejected
+    before any request is sent.
 
   Retryable failures are retried per the client's retry policy, and each retry sends the same
   request body. A timeout is not retried by default: a timed-out request may already have been

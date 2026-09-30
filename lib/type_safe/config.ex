@@ -20,6 +20,8 @@ defmodule TypeSafe.Config do
   @default_model "jev-latest"
   @default_log_level :warning
   @default_timeout 10_000
+  # `:gen_tcp.recv/3` encodes its timeout in 32 bits; a larger value would wrap.
+  @max_timeout 4_294_967_295
   @valid_log_levels [:debug, :info, :warning, :error, :off]
 
   @log_levels %{
@@ -114,6 +116,7 @@ defmodule TypeSafe.Config do
   # are rejected by name (spec §4 R2).
   @rejected_req_options [
     receive_timeout: "use the client's own timeout option instead",
+    request_timeout: "use the client's own timeout option instead",
     retry_delay: "use the retry option instead",
     max_retries: "use the retry option instead",
     retry_log_level: "the SDK owns retry logging"
@@ -126,10 +129,64 @@ defmodule TypeSafe.Config do
            Keyword.has_key?(req_options, key)
          end) do
       nil ->
-        :ok
+        validate_finch_scope(req_options)
 
       {key, hint} ->
         {:error, %TypeSafe.Error{message: "req_options must not set #{key}; #{hint}"}}
+    end
+  end
+
+  # Req merges `finch:` request options over the top-level ones, so the
+  # timeouts are rejected there too (spec §4 R2). Req also raises on the first
+  # request when `finch:` and `connect_options:` are both set, so that pair is
+  # rejected here instead of raising later. `finch:` is a keyword list, or,
+  # deprecated in Req, a pool name atom.
+  @finch_timeout_keys [:receive_timeout, :request_timeout]
+
+  defp validate_finch_scope(req_options) do
+    finch = Keyword.get(req_options, :finch)
+
+    cond do
+      is_nil(finch) or is_atom(finch) ->
+        validate_finch_connect_pair(finch, req_options)
+
+      Keyword.keyword?(finch) ->
+        with :ok <- validate_finch_timeouts(finch) do
+          validate_finch_connect_pair(finch, req_options)
+        end
+
+      true ->
+        {:error, %TypeSafe.Error{message: "req_options finch must be a keyword list"}}
+    end
+  end
+
+  defp validate_finch_timeouts(finch) do
+    case Enum.find(@finch_timeout_keys, &Keyword.has_key?(finch, &1)) do
+      nil ->
+        :ok
+
+      key ->
+        {:error,
+         %TypeSafe.Error{
+           message:
+             "req_options must not set finch: [#{key}: ...]; " <>
+               "use the client's own timeout option instead"
+         }}
+    end
+  end
+
+  defp validate_finch_connect_pair(finch, req_options) do
+    case finch && Keyword.has_key?(req_options, :connect_options) do
+      true ->
+        {:error,
+         %TypeSafe.Error{
+           message:
+             "req_options must not set both finch and connect_options; " <>
+               "Req accepts only one of them"
+         }}
+
+      _no_pair ->
+        :ok
     end
   end
 
@@ -142,10 +199,15 @@ defmodule TypeSafe.Config do
 
   @doc false
   # Shared by `new/1` and the per-call `timeout:` option (spec §4): a positive
-  # integer number of milliseconds. `nil` and floats are rejected; there is no
-  # env fallback.
+  # integer number of milliseconds, at most `@max_timeout`. `nil` and floats are
+  # rejected; there is no env fallback.
   @spec validate_timeout(term()) :: :ok | {:error, TypeSafe.Error.t()}
-  def validate_timeout(value) when is_integer(value) and value > 0, do: :ok
+  def validate_timeout(value) when is_integer(value) and value > 0 and value <= @max_timeout,
+    do: :ok
+
+  def validate_timeout(value) when is_integer(value) and value > @max_timeout do
+    {:error, %TypeSafe.Error{message: "timeout must be at most #{@max_timeout} ms, got #{value}"}}
+  end
 
   def validate_timeout(value) do
     {:error,
