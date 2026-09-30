@@ -142,11 +142,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update transitive dependencies Mint to 1.11.0 (fixes CVE-2026-91043,
   CVE-2026-92103, and CVE-2026-94194; CVE-2026-82672 was fixed in 1.10.1),
-  Finch to 0.24.0, and hpax 1.0.4 → 1.1.0 (required by Mint 1.11). Apps depending on this library resolve
-  these in their own mix.lock and should run `mix deps.update mint finch`.
-  Safe combinations: Mint >= 1.10.2 with any Finch, or Mint 1.11.x with Finch
-  >= 0.24.0 (Mint 1.11.0 with Finch 0.23.x can raise on the request after a
-  receive timeout).
+  Finch to 0.24.0, and hpax 1.0.4 → 1.1.0 (required by Mint 1.11). Apps
+  depending on this library resolve these in their own mix.lock and should run
+  `mix deps.update mint finch`. Safe combinations: Mint 1.10.x at 1.10.2 or
+  later with any Finch, or Mint 1.11.x with Finch 0.24.0 or later (Mint 1.11.0
+  with Finch 0.23.x can raise on the request after a receive timeout).
 
 ## [0.1.0] - 2026-09-17
 
