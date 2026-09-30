@@ -381,6 +381,22 @@ defmodule TypeSafe.TelemetryTest do
     refute inspect(events, limit: :infinity, printable_limit: :infinity) =~ "SUPERSECRETVALUE9"
   end
 
+  test "at :debug a digit-free dashed default header is fully masked too" do
+    client =
+      client(StubAdapter.respond(200, @ok_body),
+        log_level: :debug,
+        default_headers: %{"x-api-key" => "sk-live-SUPERSECRETVALUE x"}
+      )
+
+    assert {:ok, []} = list_models(client)
+
+    events = events()
+    all_lines = texts(events)
+    refute all_lines == []
+    refute Enum.any?(all_lines, &String.contains?(&1, "SUPERSECRETVALUE"))
+    refute inspect(events, limit: :infinity, printable_limit: :infinity) =~ "SUPERSECRETVALUE"
+  end
+
   test "at :debug credentials in the base_url never reach the url metadata or the lines" do
     client =
       client(StubAdapter.respond(200, @ok_body),
@@ -611,6 +627,16 @@ defmodule TypeSafe.TelemetryTest do
     test "a dashed first word is not a scheme: x-api-key is masked whole" do
       assert redact(%{"x-api-key" => ["sk-live-SUPERSECRETVALUE9 x"]}) ==
                %{"x-api-key" => ["***E9 x"]}
+    end
+
+    test "a digit-free dashed first word is not a scheme either: the dash alone rejects it" do
+      assert redact(%{"x-api-key" => ["sk-live-SUPERSECRETVALUE x"]}) ==
+               %{"x-api-key" => ["***UE x"]}
+    end
+
+    test "a leading space leaves an empty first word, which is not a scheme" do
+      assert redact(%{"authorization" => [" leading123456789"]}) ==
+               %{"authorization" => ["***6789"]}
     end
 
     test "a first word with a digit is not a scheme: a trailing space does not hide it" do
