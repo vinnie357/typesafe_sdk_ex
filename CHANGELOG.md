@@ -49,8 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pool" covers sizing with `finch: [size: n]` and `finch: [pool_timeout: ms]`.
 - `TypeSafe.system_one/3` returns `{:error, %TypeSafe.Error{message:
   "system_one/3 request cannot be encoded as JSON"}}`, and sends nothing, when
-  the request holds content JSON cannot encode (a PID, a tuple, a struct
-  without an encoder, invalid UTF-8), instead of raising. The message never
+  the request holds a PID, a tuple, a struct without an encoder, a tuple map
+  key, or invalid UTF-8, instead of raising. An improper list still raises. The message never
   includes the content.
 - `TypeSafe.new/1` trims U+FEFF (the byte order mark) like whitespace, for
   `api_key` and every environment value, as JS `trim` does. A BOM-only value is

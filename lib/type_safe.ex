@@ -191,10 +191,12 @@ defmodule TypeSafe do
   `{:error, %TypeSafe.Error{message: "system_one/3 requires a keyword list of options"}}`,
   and a key given twice returns `"<key> given more than once"`.
 
-  Request content that JSON cannot encode (a PID, a tuple, a struct without a
-  `Jason.Encoder`, or invalid UTF-8 in `state`, a question, or an extra key) returns
+  Request content of these shapes (a PID, a tuple, a struct without a
+  `Jason.Encoder`, a tuple map key, or invalid UTF-8 in `state`, a question, or an
+  extra key) returns
   `{:error, %TypeSafe.Error{message: "system_one/3 request cannot be encoded as JSON"}}`
-  and sends nothing. The message never includes the content.
+  and sends nothing. The message never includes the content. Malformed Elixir data
+  such as an improper list still raises: decoded JSON cannot produce it.
 
   Retryable failures are retried per the client's retry policy, and each retry sends the same
   request body. A timeout is not retried by default: a timed-out request may already have been
