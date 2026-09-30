@@ -44,7 +44,7 @@ status-mapped error struct under `TypeSafe.Error.*`:
 - `TypeSafe.Error.InternalServer` (5xx, including 529)
 - `TypeSafe.Error.API` (any other non-2xx status, e.g. 409 or 418)
 - `TypeSafe.Error.Connection` (a transport failure — closed socket, DNS, TLS)
-- `TypeSafe.Error.Timeout` (the configured timeout was exceeded)
+- `TypeSafe.Error.Timeout` (the effective timeout was exceeded)
 
 The generic `TypeSafe.Error` still covers everything that isn't a mapped
 HTTP failure: client-config problems from `new/1`, question-validation
@@ -111,9 +111,14 @@ from 100 to 999), `respect_retry_after`, `max_retry_after_ms`,
 `max_retries` and the three millisecond fields (`backoff_initial_ms`,
 `backoff_max_ms`, `max_retry_after_ms`) must be non-negative integers, and
 `backoff_jitter` a number from 0 to 1.
-An invalid value, an unknown key, or `retry: nil` returns
-`{:error, %TypeSafe.Error{}}` naming `retry.<field>`, before any request is
-sent.
+An invalid value returns `{:error, %TypeSafe.Error{}}` naming the field
+(`retry.max_retries must be a non-negative integer, got -1`), before any request
+is sent. The other rejections use these messages: `retry must be a keyword list,
+got nil` (for `retry: nil`), `retry has unknown option(s): bogus`, and
+`retry.max_retries given more than once`.
+
+Raising `max_retry_after_ms` has a cost: a server's `Retry-After` up to that
+value makes one call sleep that long before it retries.
 
 Every retry carries an `X-TypeSafe-Retry-Count` header with the retry number
 (`"1"`, `"2"`, ...). The first attempt has no such header, and a value you set
@@ -122,10 +127,49 @@ yourself is removed.
 `req_options` cannot set `retry_delay`, `max_retries`, or `retry_log_level`;
 `new/1` returns an error naming the option.
 
+## Timeouts
+
+Every request has a timeout of 10 seconds (10_000 ms) by default. Set another
+value, in whole milliseconds, on the client with `timeout:`, and override it per
+call on `TypeSafe.system_one/3` and `TypeSafe.list_models/2`. A per-call value
+wins for that call and leaves the client unchanged:
+
+```elixir
+{:ok, client} = TypeSafe.new(timeout: 30_000)
+
+# This call times out after 5 seconds.
+{:ok, models} = TypeSafe.list_models(client, timeout: 5_000)
+```
+
+`timeout:` must be a positive integer of at most 4_294_967_295 (about 49.7
+days). A float, `0`, a negative number, or `nil` returns `{:error,
+%TypeSafe.Error{}}` (`timeout must be a positive integer, got nil`), and a larger
+integer returns `timeout must be at most 4294967295 ms, got <n>`, both before any
+request is sent. There is no environment-variable fallback.
+
+The timeout applies to each attempt, not to the call as a whole: a retry gets a
+fresh timeout, so a call with retries can take longer in total. It is passed to
+Req as `receive_timeout`, which limits the wait for each read from the socket,
+so a response that trickles in slowly can run past it.
+
+**`timeout:` does not bound connecting.** Opening the connection uses Finch's
+default of 5_000 ms. Change it with `req_options: [connect_options: [timeout:
+ms]]`. When a request times out, whether while reading or while connecting, the
+error is a `TypeSafe.Error.Timeout` whose `timeout_ms` is the configured
+per-read `timeout:` for that call, not the time that elapsed, so a connect
+timeout reports it too. A timeout is not retried unless you set
+`retry: [api_timeout_error: true]`, and that also covers a connect timeout,
+because Req reports both the same way.
+
+`req_options` cannot set `receive_timeout` or `request_timeout`, at the top level
+or under `finch:`; `new/1` returns an error naming the option. To bound waiting
+for a free connection in the pool, use `req_options: [finch: [pool_timeout:
+ms]]`. A top-level `pool_timeout` also works, but Req deprecates it and prints a
+warning on every `new/1`. `finch:` and `connect_options:` cannot be combined, and
+`new/1` rejects the pair.
+
 ### Known limitations
 
-- **Fixed timeout.** Every request uses a fixed 10-second timeout; there is no
-  client-level or per-call timeout option yet.
 - **No logging.**
 - **No telemetry.**
 

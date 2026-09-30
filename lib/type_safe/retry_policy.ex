@@ -61,11 +61,14 @@ defmodule TypeSafe.RetryPolicy do
   @doc """
   Validates `overrides` (a keyword list of the fields above) and returns
   `{:ok, policy}` with those fields replaced, or `{:error, %TypeSafe.Error{}}`
-  whose message names the offending `retry.<field>`. Never raises.
+  whose message names the problem: `retry must be a keyword list, got <value>`,
+  `retry has unknown option(s): <keys>`, `retry.<key> given more than once`, or
+  `retry.<field> must be <expected>, got <value>`. Never raises.
   """
   @spec merge(t(), term()) :: {:ok, t()} | {:error, TypeSafe.Error.t()}
   def merge(%__MODULE__{} = policy, overrides) do
     with :ok <- check_keyword(overrides),
+         :ok <- check_duplicates(overrides),
          {:ok, known} <- check_keys(overrides),
          {:ok, values} <- normalize_all(known) do
       {:ok, struct(policy, values)}
@@ -76,6 +79,16 @@ defmodule TypeSafe.RetryPolicy do
     case Keyword.keyword?(overrides) do
       true -> :ok
       false -> error("retry must be a keyword list, got #{inspect(overrides)}")
+    end
+  end
+
+  # Must run before `Keyword.validate/2`, which reports a duplicate as unknown.
+  defp check_duplicates(overrides) do
+    keys = Keyword.keys(overrides)
+
+    case keys -- Enum.uniq(keys) do
+      [] -> :ok
+      [key | _] -> error("retry.#{key} given more than once")
     end
   end
 

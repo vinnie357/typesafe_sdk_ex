@@ -14,15 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   set with `retry:` on `TypeSafe.new/1` and overridden, merged field by field,
   per call on `TypeSafe.system_one/3` and `TypeSafe.list_models/2`. Retries send
   an `X-TypeSafe-Retry-Count` header. See `TypeSafe.RetryPolicy`.
+- `timeout:` (positive integer milliseconds) on `TypeSafe.new/1` and per call on
+  `TypeSafe.system_one/3` and `TypeSafe.list_models/2`. The effective value is
+  sent to Req as `receive_timeout` on every attempt and reported by
+  `TypeSafe.Error.Timeout`. `nil`, floats, `0`, and negatives are rejected, as
+  is a value above 4_294_967_295 ms. `timeout:` bounds each socket read, not
+  connecting (Finch's 5_000 ms default, set with
+  `req_options: [connect_options: [timeout: ms]]`).
 
 ### Changed
 
+- A `retry:` list that repeats a key is rejected with
+  `retry.<key> given more than once` instead of `retry has unknown option(s)`.
 - Timeouts are not retried by default (`api_timeout_error: false`), unlike the
   JS SDK: a timed-out `POST /v1/systemone` may already have been processed and
   billed. Opt in with `retry: [api_timeout_error: true]`.
 - `req_options` now rejects `retry_delay`, `max_retries`, and `retry_log_level`,
-  naming the option.
-
+  naming the option, and rejects `request_timeout` and `finch: [receive_timeout:
+  ...]` / `finch: [request_timeout: ...]`, which would override `timeout:`.
+  `finch:` together with `connect_options:` is rejected at `new/1` instead of
+  raising on the first request. Use `finch: [pool_timeout: ms]` rather than the
+  deprecated top-level `pool_timeout`.
+  These checks read `req_options` as Req resolves it, where the last of a
+  repeated key wins, so `[finch: [pool_size: 2], finch: [receive_timeout: 5]]`
+  is rejected and `[finch: [receive_timeout: 5], finch: [pool_size: 2]]` is
+  not.
 - `TypeSafe.Error.RateLimit.retry_after_ms` now parses `retry-after-ms`,
   decimal-seconds `Retry-After` values, and HTTP dates (IMF-fixdate, RFC 850,
   asctime), rounded to whole milliseconds; previously only integer seconds
