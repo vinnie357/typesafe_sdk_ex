@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-30
+
 ### Added
 
 - Retries: requests failing with 408, 429, 5xx, or a connection error are
@@ -50,8 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TypeSafe.system_one/3` returns `{:error, %TypeSafe.Error{message:
   "system_one/3 request cannot be encoded as JSON"}}`, and sends nothing, when
   the request holds a PID, a tuple, a struct without an encoder, a tuple map
-  key, or invalid UTF-8, instead of raising. An improper list still raises. The message never
-  includes the content.
+  key, or invalid UTF-8, instead of raising. Malformed Elixir data still raises:
+  an improper list (`FunctionClauseError`), a charlist map key holding an
+  invalid code point (`UnicodeConversionError`), and an improper-list map key
+  (`ArgumentError`). The message never includes the content.
 - `TypeSafe.new/1` trims U+FEFF (the byte order mark) like whitespace, for
   `api_key` and every environment value, as JS `trim` does. A BOM-only value is
   blank, and a BOM around a key is no longer sent in the `authorization` header.

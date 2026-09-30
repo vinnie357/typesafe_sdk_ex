@@ -24,7 +24,11 @@ response["answers"]["category"]["choice"]
 
 `TypeSafe.new/1` also accepts `api_key:`, `base_url:`, `default_model:`, and
 `log_level:` options, each falling back to its `TYPESAFE_*` environment
-variable and then a default — see the `@doc` on `TypeSafe.new/1`.
+variable. `base_url`, `default_model`, and `log_level` then fall back to a
+default; `api_key` has none, and `new/1` returns an error without one. The
+client stores `log_level`, but nothing logs yet (see [Known
+limitations](#known-limitations)). The `@doc` on `TypeSafe.new/1` lists every
+option.
 
 Question helpers `TypeSafe.noul/0,1,2`, `TypeSafe.choice/2`, and
 `TypeSafe.score/2` build the typed questions passed to `system_one/3`.
@@ -49,8 +53,11 @@ status-mapped error struct under `TypeSafe.Error.*`:
 
 The generic `TypeSafe.Error` still covers everything that isn't a mapped
 HTTP failure: client-config problems from `new/1`, question-validation
-failures from `system_one/3` (including request content JSON cannot encode),
-and an unexpected `/v1/models` response shape.
+failures from `system_one/3` (including request content JSON cannot encode: a
+PID, a function, a tuple, a struct without an encoder, a tuple map key, or
+invalid UTF-8), and an unexpected `/v1/models` response shape. Malformed Elixir
+data still raises: an improper list, a charlist map key holding an invalid code
+point, and an improper-list map key.
 
 There is **no shared base struct** — the ten `TypeSafe.Error.*` structs and
 the generic `TypeSafe.Error` are unrelated exceptions. Match on `{:error,
@@ -168,11 +175,6 @@ for a free connection in the pool, use `req_options: [finch: [pool_timeout:
 ms]]`. A top-level `pool_timeout` is rejected. `finch:` and `connect_options:`
 cannot be combined, and `new/1` rejects the pair.
 
-### Known limitations
-
-- **No logging.**
-- **No telemetry.**
-
 ## Connection pool
 
 Requests share a Finch connection pool, and a request holds one connection for
@@ -259,18 +261,38 @@ A `finch: [name: MyApp.Finch]` that names a pool you did not start raises
 `ArgumentError` on the first call. That is a programming error, like sending a
 message to a process that is not running.
 
+## Known limitations
+
+- **No logging.** `log_level:` and `TYPESAFE_LOG_LEVEL` are accepted and stored
+  on the client, and nothing reads them yet
+  ([#13](https://github.com/vinnie357/typesafe_sdk_ex/issues/13)).
+- **No telemetry.** The SDK emits no events of its own
+  ([#13](https://github.com/vinnie357/typesafe_sdk_ex/issues/13)).
+- **No supervised client and no shared rate-limit cooldown.** `TypeSafe.new/1`
+  returns a plain struct, and the SDK starts no process of its own. Each client
+  backs off on its own
+  ([#14](https://github.com/vinnie357/typesafe_sdk_ex/issues/14)).
+
 ## Installation
 
 This package is not on Hex — the name `typesafe_sdk` there belongs to a
-different project. Install it as a git dependency:
+different project. Install it as a git dependency, pinned to a release tag:
 
 ```elixir
 def deps do
   [
-    {:typesafe_sdk_ex, github: "vinnie357/typesafe_sdk_ex"}
+    {:typesafe_sdk_ex, github: "vinnie357/typesafe_sdk_ex", tag: "v0.2.0"}
   ]
 end
 ```
+
+### Mint and Finch versions
+
+This package declares no Mint or Finch constraint, so your `mix.lock` decides
+them. Use Mint 1.10.2 or later with any Finch, or Mint 1.11.x with Finch 0.24.0
+or later, and update with `mix deps.update mint finch`. Mint 1.10.2 and 1.11.0
+carry fixes for published security advisories, and Mint 1.11.x with a Finch
+before 0.24.0 can raise on the request after a receive timeout.
 
 ## Development
 
@@ -281,8 +303,8 @@ mise install
 mise run ci
 ```
 
-`mise run ci` runs the full local quality gate: compile with warnings as
-errors, format check, `credo --strict`, the test suite, `mix hex.audit`,
-and a gitleaks scan.
+`mise run ci` runs the full local quality gate: a `mix.lock` check, format
+check, compile with warnings as errors, `credo --strict`, the test suite,
+`mix hex.audit`, and a gitleaks scan.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution workflow.

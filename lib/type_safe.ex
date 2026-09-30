@@ -44,7 +44,7 @@ defmodule TypeSafe do
   ## Examples
 
       iex> TypeSafe.version()
-      "0.1.1"
+      "0.2.0"
 
   """
   @spec version() :: String.t()

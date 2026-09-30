@@ -19,7 +19,7 @@ The JS suite injects a `mockFetch` and fake timers (`test/helpers.ts:10-21`, `te
 8. `TypeSafe.Retry.delay_ms/4` and `TypeSafe.Retry.parse_retry_after/2` are pure. Tests pass the clock and the random function. `decide/2` is not pure (ADR 0007), so its tests use zero jitter and no HTTP-date header.
 9. End-to-end retry tests use zero delay: `retry: [backoff_initial_ms: 0, backoff_max_ms: 0]`, `retry-after-ms: 0`, or `respect_retry_after: false` with zero backoff. `Process.sleep(0)` returns at once.
 10. The SDK adds no `:sleep` option. Req calls `Process.sleep/1` directly (`lib/req/steps.ex:1815`).
-11. One test uses a real socket: a loopback `:gen_tcp` server delays its first response past a short client timeout, and a second call on the same client must return `{:ok, _}` or a clean `{:error, %TypeSafe.Error.*{}}` and never raise. The server is a long-lived acceptor process that owns the listener, binds port 0, and closes the listener in `on_exit`.
+11. One test uses a real socket: a loopback `:gen_tcp` server holds its first response until the test releases it, which the test does once the second call is on the wire, so no wall-clock delay decides the outcome (issue #15). The first call has a short client timeout and times out. The second call on the same client, made with a longer timeout, must return `{:ok, _}` or a clean `{:error, %TypeSafe.Error.*{}}` and never raise. The server is a long-lived acceptor process that owns the listener, binds port 0, and closes the listener in `on_exit`.
 12. No test calls the live API, and `mise run ci` needs no API key.
 
 ## Consequences
