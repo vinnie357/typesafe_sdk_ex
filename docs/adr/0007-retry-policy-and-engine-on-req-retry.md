@@ -1,7 +1,7 @@
 # ADR 0007: Retry policy and engine on Req's `:retry`
 
 **Status:** Accepted
-**Date:** 2026-09-29; amended 2026-09-30 (issue #12); the struct, defaults, and `inspect` rendering date from 2026-09-17
+**Date:** 2026-09-29; amended 2026-09-30 (issue #12); amended 2026-09-30 (telemetry, issue #13); the struct, defaults, and `inspect` rendering date from 2026-09-17
 
 ## Context
 
@@ -43,14 +43,14 @@ Left on, that default retried a `GET /v1/models` 503 four times over about 6.7 s
 ### Engine
 
 10. Retries run through Req's `:retry` with the 2-arity function `&TypeSafe.Retry.decide/2`. It returns `{:delay, ms}` or `false` (`steps.ex:1682-1690`).
-11. Each call wires the engine: `Req.request(req, retry: &decide/2, max_retries: policy.max_retries, retry_log_level: false, receive_timeout: timeout)`. The effective policy travels in `request.private[:typesafe_retry_policy]`.
+11. Each call wires the engine: `Req.request(req, retry: &decide/2, max_retries: policy.max_retries, retry_log_level: false, receive_timeout: timeout)`. The effective policy travels in `request.private[:typesafe_retry_policy]`. `decide/2` wraps the retry decision: it computes the result as before, reports the attempt's end to `TypeSafe.Telemetry` (a `:stop` event, then a `:retry` event when the result is `{:delay, ms}`), and returns the result unchanged. A request without telemetry state in its private data emits nothing, so the direct tests of `decide/2` stay valid (ADR 0013).
 12. `client.req` itself keeps `retry: false`, so Req's default retry never runs.
 13. The SDK does not use `:retry_delay` or `:safe_transient`. A `:retry_delay` function receives only the retry count (`steps.ex:1693-1700`), so it cannot read `retry-after-ms` or apply the ceiling. Once `:retry_delay` is set, Req skips Retry-After entirely (`steps.ex:1826-1828`). Setting it together with `{:delay, _}` raises `ArgumentError` (`steps.ex:1748-1753`).
 14. `decide/2` returns `false` for any 2xx response, even when `http_statuses` lists it.
 15. For another response, `decide/2` retries when the status is in `http_statuses`.
 16. A Finch pool-checkout timeout never reaches `decide/2`: the SDK turns it into `TypeSafe.Error.Connection` with `reason: :pool_timeout` outside Req's retry loop, and does not retry it under any policy (ADR 0006 decision 15).
     For an exception, `decide/2` follows `api_timeout_error` when it is `%Req.TransportError{reason: :timeout}`, and `api_connection_error` for any other exception (`client.ts:150-154,383-384`).
-17. `decide/2` reads the attempt number from `:req_retry_count` and returns `false` once it reaches `max_retries`. Req calls the retry function even when retries have run out, but its own `do_retry` gates on `retry_count < max_retries` and returns the response or exception unchanged (`req@0.7.4 lib/req/steps.ex:1807-1822`), so Req stops without the check. The check keeps `decide/2` from reporting a retry that will not happen; it matters once a logger reads that result, and logging is not built. After retries run out, the SDK returns the last error.
+17. `decide/2` reads the attempt number from `:req_retry_count` and returns `false` once it reaches `max_retries`. Req calls the retry function even when retries have run out, but its own `do_retry` gates on `retry_count < max_retries` and returns the response or exception unchanged (`req@0.7.4 lib/req/steps.ex:1807-1822`), so Req stops without the check. The check keeps `decide/2` from reporting a retry that will not happen; the `:retry` event reads that result (ADR 0013). After retries run out, the SDK returns the last error.
 18. The delay is one of two values. When `respect_retry_after` is set, the response has headers, and the parsed Retry-After is not `nil` and is at most `max_retry_after_ms`, the delay is that value exactly, with no jitter. Otherwise the delay is `round(min(backoff_initial_ms * 2^attempt, backoff_max_ms) * (1 - random * backoff_jitter))`, with `random` in `[0, 1)` (`retry.ts:56-68`). Transport errors have no headers and always use backoff.
 19. The ceiling applies on the delay path. `delay_ms/4`, and `decide/2` through it, fall back to backoff when the parsed value exceeds `max_retry_after_ms`. No value handed to Req exceeds `max(max_retry_after_ms, backoff_max_ms)`. The parser itself returns uncapped values (ADR 0009).
 20. A request step sets `x-typesafe-retry-count` from Req's private retry counter on every attempt (ADR 0005).

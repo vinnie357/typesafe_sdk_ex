@@ -75,7 +75,9 @@ defmodule TypeSafe do
   - `:base_url` — default `https://api.typesafe.ai`. Must be a string; trailing slashes
     are stripped.
   - `:default_model` — default `jev-latest`. Must be a string.
-  - `:log_level` — one of `t:log_level/0`, default `:warning`.
+  - `:log_level` — one of `t:log_level/0`, default `:warning`. It sets which lines the default
+    logger prints for this client's calls (see `attach_default_logger/1`) and is carried in every
+    `:telemetry` event's metadata. It does not stop the events.
   - `:default_headers` — a map merged onto every request, default `%{}`.
   - `:req_options` — a keyword list of transport options for `Req.new/1`. Only these
     top-level keys are supported: `adapter`, `connect_options`, `finch`, `finch_private`,
@@ -245,6 +247,30 @@ defmodule TypeSafe do
   @spec system_one(TypeSafe.Client.t(), request(), keyword()) ::
           {:ok, term() | with_response_result()} | {:error, Exception.t()}
   defdelegate system_one(client, request, opts \\ []), to: TypeSafe.HTTP
+
+  @doc """
+  Attaches the default logger: a `:telemetry` handler that prints each client's calls in the JS
+  SDK's log format, prefixed `[typesafe-sdk] `, through `Logger`.
+
+  Call it once at startup. Each line is printed only when the client's `:log_level` allows it:
+  `:info` prints one summary line per attempt and one per retry, `:debug` adds the request line
+  (URL, redacted headers, body) and the response body, and `:warning` (the default), `:error` and
+  `:off` print nothing. The application's `Logger` level must allow `:info` or `:debug` as well.
+  `:debug` prints request and response bodies unredacted; only credential headers are masked.
+
+  Takes no options yet: an unknown key returns `{:error, %TypeSafe.Error{}}`. Returns `:ok`, or
+  `{:error, :already_exists}` when it is already attached. See `TypeSafe.Telemetry` for the events
+  behind it.
+  """
+  @spec attach_default_logger(keyword()) ::
+          :ok | {:error, :already_exists} | {:error, TypeSafe.Error.t()}
+  defdelegate attach_default_logger(opts \\ []), to: TypeSafe.Telemetry
+
+  @doc """
+  Detaches the default logger. Returns `:ok`, or `{:error, :not_found}` when it is not attached.
+  """
+  @spec detach_default_logger() :: :ok | {:error, :not_found}
+  defdelegate detach_default_logger(), to: TypeSafe.Telemetry
 
   @doc """
   Builds a `noul` question with no instructions and no criteria.

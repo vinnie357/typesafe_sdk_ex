@@ -1,17 +1,19 @@
 # ADR 0002: Runtime dependency is Req only
 
 **Status:** Accepted
-**Date:** 2026-09-17; amended 2026-09-29 (`:inets`, Mint and Finch); amended 2026-09-30 (README consumer note)
+**Date:** 2026-09-17; amended 2026-09-29 (`:inets`, Mint and Finch); amended 2026-09-30 (README consumer note); amended 2026-09-30 (`:telemetry`, issue #13)
 
 ## Context
 
 The operator set the dependency constraint at the start of the port (2026-09-17): the only runtime dependency is `req`. Req brings Finch, Mint, and Jason transitively. `credo` is a CI-only tool. The constraint excludes `plug`, `ex_doc`, Mox, NimbleOptions, and any direct Jason call.
 
+On 2026-09-30 the operator made `:telemetry` a second runtime dependency, declared directly (issue #13, decision comment). Req's own dependency tree already contains it, locked at 1.4.2, so the lock file is unchanged. The title keeps its original name.
+
 Several JS features tempt a dependency (see the table under Decision). Each has a stdlib, OTP, or Req substitute.
 
 ## Decision
 
-1. `req` is the only runtime dependency. `mix.exs` lists `credo` with `only: [:dev, :test], runtime: false`.
+1. `req` and `telemetry` are the runtime dependencies. `mix.exs` lists `{:telemetry, "~> 1.0"}`, and `credo` with `only: [:dev, :test], runtime: false`.
 2. `lib/` and `test/` call no Jason, NimbleOptions, Mox, `Req.Test`, plug, or Timex function.
 3. The SDK uses the substitutes in the table below.
 4. `:inets` is listed in `extra_applications`, so a release bundles `:httpd_util`.
@@ -30,13 +32,14 @@ Several JS features tempt a dependency (see the table under Decision). Each has 
 | Jitter | `:rand.uniform/0`. |
 | Runtime header | `System.version/0` and `:erlang.system_info(:otp_release)`. |
 | Version | `Application.spec/2`, with the compile-time version as fallback. |
+| Events | `:telemetry` (ADR 0013). |
 | Test HTTP stubs | A Req module adapter, not `Req.Test` or Mox (ADR 0012). |
 
 ## Consequences
 
 ### Positive
 
-- The dependency surface is one package. Consumers audit Req, Finch, Mint, and their transitive set, and nothing added by this SDK.
+- The dependency surface is two packages. Consumers audit Req, Finch, Mint, and their transitive set, and `telemetry`, which Req's tree already holds, so this SDK adds nothing to it.
 - Stdlib `JSON` removes the content-type coupling of Req's default decoder.
 
 ### Negative

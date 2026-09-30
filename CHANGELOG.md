@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `:telemetry` events for every HTTP attempt: `[:typesafe, :attempt, :start]`,
+  `[:typesafe, :attempt, :stop]`, and `[:typesafe, :request, :retry]`. See
+  `TypeSafe.Telemetry`.
+- `TypeSafe.attach_default_logger/1` and `TypeSafe.detach_default_logger/0`: an
+  opt-in `Logger` handler that prints the JS SDK's log lines, prefixed
+  `[typesafe-sdk] `. At `:debug` it logs request and response bodies unredacted
+  and masks credential headers. See ADR 0013.
+
+### Changed
+
+- `log_level:` and `TYPESAFE_LOG_LEVEL` now take effect, through the default
+  logger, per client. Nothing is logged unless the default logger is attached.
+- `:telemetry` is a direct dependency (`~> 1.0`), at the same locked 1.4.2 that
+  Req already brought in.
+
 ## [0.2.0] - 2026-09-30
 
 ### Added

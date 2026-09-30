@@ -1,7 +1,7 @@
 # ADR 0001: Port the JS SDK v0.6.0 as the behavioral reference
 
 **Status:** Accepted
-**Date:** 2026-09-17; upstream re-verified 2026-09-29
+**Date:** 2026-09-17; upstream re-verified 2026-09-29; amended 2026-09-30 (logging, issue #13)
 
 ## Context
 
@@ -45,6 +45,7 @@ On 2026-09-29 the JS repository was identical to the pinned commit: the GitHub c
 | An explicit blank `api_key` is rejected even when the env key is set; JS sends `Bearer ` | ADR 0004 |
 | An unrecognized `TYPESAFE_LOG_LEVEL` falls back to `:warning`; JS throws | ADR 0004 |
 | The `log_level` option takes atoms only; JS takes the strings | ADR 0004 |
+| Logging is `:telemetry` events plus an opt-in default logger. Request numbers are VM-wide, header names are lowercase in Req's list shape, the request body is the JSON string, debug detail uses `inspect/1`, the URL loses its userinfo, a credential header value is split into scheme and secret only when its first word is letters alone (typesafe-ai/typesafe-sdk-js#18), and there are no abort lines | ADR 0013 |
 | `User-Agent`, `X-TypeSafe-SDK`, and `X-TypeSafe-Runtime` carry Elixir values | ADR 0005 |
 | `req_options` cannot override SDK-owned settings; the header surface is a one-value map | ADR 0005 |
 | Raw-body error messages use the original body text; the `Timeout` struct is separate from `Connection` | ADR 0006 |
@@ -70,7 +71,8 @@ On 2026-09-29 the JS repository was identical to the pinned commit: the GitHub c
 | ESM, CJS, and JSR packaging, tsdown, dist tests | A Hex package. |
 | Type-level tests (`test/types.test-d.ts`) | None. The SDK infers no answer types (ADR 0003). |
 | `ENV` constant as a runtime value | Documented in `TypeSafe.new/1`; no public function. |
-| Logging, the `logger` option, and credential redaction (`src/logging.ts`) | Not built. `log_level` is accepted and has no effect (ADR 0004). The design notes are in the [last full spec](https://github.com/vinnie357/typesafe_sdk_ex/blob/e83f7a28c126f6f9ead2fb14bf8edcd3a9efd4c4/docs/spec.md) (section 7), which no ADR endorses. |
+| Logging and credential redaction (`src/logging.ts`) | Ported as `:telemetry` events and an opt-in default logger that prints the JS lines (ADR 0013). |
+| The `logger` option (`client.ts:276`, `types.ts:236-237`) | None. The sink is `:telemetry` and `Logger`; the level is the client's `log_level` (ADR 0013). |
 
 ## Consequences
 
@@ -89,7 +91,7 @@ On 2026-09-29 the JS repository was identical to the pinned commit: the GitHub c
 
 - **Follow the docs where they disagree with JS.** Rejected. The docs contradict each other (`api.md` versus `primitives/choice.md` on description types), and the JS test suite pins the observed behavior.
 - **Follow the Python SDK.** Rejected. The Python SDK adds a 30 s total retry budget and response validation. The Elixir call shape follows the JS request object, which matches the JS tests the port reuses.
-- **Port JS logging, `AbortSignal`, and `bufferResponse` too.** Rejected for now: the BEAM lacks an equivalent for the first two, and Req/Finch cover the third at a different granularity.
+- **Port JS `AbortSignal` and `bufferResponse` too.** Rejected: the BEAM lacks an equivalent for the first, and Req/Finch cover the second at a different granularity. JS logging is ported as `:telemetry` events and a default logger (ADR 0013).
 
 ## References
 
