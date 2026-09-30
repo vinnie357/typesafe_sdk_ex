@@ -67,8 +67,8 @@ defmodule TypeSafe.Telemetry do
   Credential headers (`authorization`, `proxy-authorization`, `x-api-key`, `cookie`,
   `set-cookie`) are redacted before the event is emitted. `cookie` and `set-cookie`
   become `"***"`. For the other three, the value is split on its first run of
-  whitespace: Unicode whitespace plus U+FEFF on valid UTF-8, ASCII whitespace on
-  invalid UTF-8. This is close to, not the same as, JS `\s` (ADR 0013 decision 15).
+  whitespace: PCRE's Unicode `\\s` (Unicode whitespace plus U+180E) plus U+FEFF on
+  valid UTF-8, ASCII `\\s` on invalid UTF-8. This is close to, not the same as, JS `\\s` (ADR 0013 decision 15).
   When the first word is `Bearer`, `Basic`, `Token`, `Digest` or `Negotiate` (any
   case), it is kept as given, followed by `***` and the last four graphemes of the
   second word when that word is longer than eight (`"Bearer abcdefghijkl"` becomes

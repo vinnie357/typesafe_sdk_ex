@@ -284,7 +284,7 @@ or `TYPESAFE_LOG_LEVEL`, per client:
 
 The `#N` in each line is a request number, shared by the attempts and retries of
 one call. It counts across the whole VM, not per client, so it does not restart
-at `#1` for each client.
+at `#1` for each client, and the numbers are not necessarily consecutive.
 
 Your application's `Logger` level has to allow `:info` or `:debug` too, or
 `Logger` drops the lines. An unrecognized `TYPESAFE_LOG_LEVEL` falls back to
@@ -297,8 +297,8 @@ text, and response bodies, unredacted. Only credential headers are masked:
 of a secret longer than eight graphemes (`Bearer ***cdef`). Any other value that
 contains whitespace is masked as `***`, a value with no whitespace is masked as
 `***` plus its last four graphemes when it is longer than eight, and `cookie` and
-`set-cookie` become `***`. Whitespace here is Unicode whitespace plus U+FEFF, or
-ASCII whitespace alone when the value is not valid UTF-8. That is close to, not
+`set-cookie` become `***`. Whitespace here is PCRE's Unicode `\s` (Unicode whitespace plus U+180E) plus
+U+FEFF, or ASCII `\s` alone when the value is not valid UTF-8. That is close to, not
 exactly, what JS treats as whitespace; a value split only by a code point that is
 not whitespace, such as a zero-width space (U+200B), counts as having none (see
 ADR 0013 for the rule).

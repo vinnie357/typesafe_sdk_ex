@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opt-in `Logger` handler that prints the JS SDK's log lines, prefixed
   `[typesafe-sdk] `. At `:debug` it logs request and response bodies unredacted
   and masks credential headers: a `Bearer`, `Basic`, `Token`, `Digest`, or
-  `Negotiate` scheme is kept, and any other value that contains whitespace (Unicode
-  whitespace or U+FEFF, or ASCII whitespace when the value is not valid UTF-8) becomes `***`. See ADR 0013.
+  `Negotiate` scheme is kept, and any other value that contains whitespace (PCRE's
+  Unicode `\s`, which is Unicode whitespace plus U+180E, or U+FEFF; ASCII `\s` when the value is not valid UTF-8) becomes `***`. See ADR 0013.
 
 ### Changed
 
