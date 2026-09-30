@@ -126,7 +126,7 @@ Every retry carries an `X-TypeSafe-Retry-Count` header with the retry number
 yourself is removed.
 
 `req_options` cannot set `retry_delay`, `max_retries`, or `retry_log_level`;
-`new/1` returns an error naming the option.
+`new/1` returns an error naming the option. See [Request options](#request-options).
 
 ## Timeouts
 
@@ -165,9 +165,8 @@ because Req reports both the same way.
 `req_options` cannot set `receive_timeout` or `request_timeout`, at the top level
 or under `finch:`; `new/1` returns an error naming the option. To bound waiting
 for a free connection in the pool, use `req_options: [finch: [pool_timeout:
-ms]]`. A top-level `pool_timeout` also works, but Req deprecates it and prints a
-warning on every `new/1`. `finch:` and `connect_options:` cannot be combined, and
-`new/1` rejects the pair.
+ms]]`. A top-level `pool_timeout` is rejected. `finch:` and `connect_options:`
+cannot be combined, and `new/1` rejects the pair.
 
 ### Known limitations
 
@@ -210,8 +209,8 @@ milliseconds):
 
 To share one pool across clients, or across your application, start a named
 Finch pool in your supervision tree and point the client at it. Pool options
-such as `size:` belong to the pool you start, and `finch:` cannot set both
-`name:` and pool options; `pool_timeout:` may go with `name:`:
+such as `size:` belong to the pool you start, and `new/1` rejects `finch:` with
+`name:` and a pool option; `pool_timeout:` and `pool_tag:` may go with `name:`:
 
 ```elixir
 children = [{Finch, name: MyApp.Finch, pools: %{default: [size: 200]}}]
@@ -220,6 +219,45 @@ children = [{Finch, name: MyApp.Finch, pools: %{default: [size: 200]}}]
 {:ok, client} =
   TypeSafe.new(req_options: [finch: [name: MyApp.Finch, pool_timeout: 15_000]])
 ```
+
+## Request options
+
+`req_options` passes transport settings to Req. `new/1` accepts only these
+top-level keys: `adapter`, `connect_options`, `finch`, `finch_private`,
+`headers`, `inet6`, and `unix_socket`. It also accepts `base_url`,
+`decode_body`, `retry`, and `auth`, but the SDK overrides them: `base_url` is
+the client's, `decode_body` and `retry` are `false`, and `auth` is dropped. Any
+other key, such as `http_errors`, `url`, `json`, `body`, `params`, `plug`, or
+`redirect`, makes `new/1` return `{:error, %TypeSafe.Error{}}` naming it.
+
+- `finch:` takes a keyword list with the keys `name`, `pool_timeout`,
+  `pool_tag`, `size`, `count`, `protocols`, `conn_opts`, `pool_max_idle_time`,
+  `conn_max_idle_time`, `start_pool_metrics?`, and `http2`. A pool name given
+  as an atom (`finch: MyApp.Finch`) is rejected; write `finch: [name:
+  MyApp.Finch]`. `name:` cannot go with a pool option other than
+  `pool_timeout` and `pool_tag`.
+- `connect_options:` takes a keyword list with the keys `timeout`, `protocols`,
+  `transport_opts`, `proxy`, `proxy_headers`, `hostname`, and
+  `client_settings`. It cannot be combined with `finch:`.
+- `headers:` takes a map or a list of `{name, value}` pairs. A name is a
+  binary or an atom, and a value is a binary or a list of binaries; integer and
+  `DateTime` values are rejected. The SDK's own `authorization` header wins over
+  one you set here.
+
+`new/1` checks keys and the shapes stated above, not values: a wrong-typed value
+such as `finch: [size: :x]` or `adapter: 5` passes `new/1` and raises on the
+first call. The check runs on Req's application config, `config :req,
+:default_options`, with `req_options` merged over it. A key that `req_options`
+sets replaces the whole value from that config, so a `finch:` in `req_options`
+hides a `finch:` in the config, and neither is merged with the other. The last
+of a repeated key wins. An entry in `config :req, :default_options` is validated
+too, and the error names it as `config :req, :default_options`. When
+`req_options` sets no `headers:`, every `headers:` entry in the config is
+checked, because Req folds them all. `new/1` reads the config when it runs.
+
+A `finch: [name: MyApp.Finch]` that names a pool you did not start raises
+`ArgumentError` on the first call. That is a programming error, like sending a
+message to a process that is not running.
 
 ## Installation
 

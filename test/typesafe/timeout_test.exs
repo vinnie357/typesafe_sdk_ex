@@ -424,7 +424,7 @@ defmodule TypeSafe.TimeoutTest do
 
   test "req_options cannot override the timeout through finch options" do
     for key <- [:receive_timeout, :request_timeout],
-        finch <- [[{key, 5}], [{:pool_size, 2}, {key, 5}]] do
+        finch <- [[{key, 5}], [{:size, 2}, {key, 5}]] do
       assert {:error, %Error{message: message}} = new_client(req_options: [finch: finch])
 
       assert message =~ "req_options must not set"
@@ -436,7 +436,7 @@ defmodule TypeSafe.TimeoutTest do
 
   # Green when written: pins the non-deprecated pool-timeout route (spec §4 R2).
   test "finch options that leave the timeout alone stay accepted" do
-    for finch <- [[pool_timeout: 1_000], [pool_size: 2]] do
+    for finch <- [[pool_timeout: 1_000], [size: 2]] do
       assert {:ok, %TypeSafe.Client{}} = new_client(req_options: [finch: finch])
     end
   end
@@ -473,7 +473,7 @@ defmodule TypeSafe.TimeoutTest do
   # §11 S3c #59 (Gate 4 N3): Req raises ArgumentError for this pair on the
   # first request, and the SDK never raises, so new/1 rejects it up front.
   test "finch together with connect_options is rejected at new/1, and each alone is accepted" do
-    for finch <- [[pool_timeout: 1_000], [pool_size: 2]] do
+    for finch <- [[pool_timeout: 1_000], [size: 2]] do
       assert {:error, %Error{message: message}} =
                new_client(req_options: [finch: finch, connect_options: [timeout: 300]])
 
@@ -514,7 +514,7 @@ defmodule TypeSafe.TimeoutTest do
     end
 
     @entries [
-      [finch: [pool_size: 2]],
+      [finch: [size: 2]],
       [finch: [receive_timeout: 5]],
       [finch: [request_timeout: 5]],
       [finch: :some_pool],
@@ -546,12 +546,12 @@ defmodule TypeSafe.TimeoutTest do
 
     test "the named rows are rejected or resolve cleanly, and never raise" do
       rows = [
-        [finch: [pool_size: 2], finch: [receive_timeout: 5]],
-        [finch: [receive_timeout: 5], finch: [pool_size: 2]],
-        [finch: [pool_size: 2], finch: [request_timeout: 5]],
+        [finch: [size: 2], finch: [receive_timeout: 5]],
+        [finch: [receive_timeout: 5], finch: [size: 2]],
+        [finch: [size: 2], finch: [request_timeout: 5]],
         [finch: :some_pool, finch: [receive_timeout: 5]],
         [receive_timeout: 1, receive_timeout: 2],
-        [connect_options: [timeout: 1], connect_options: [timeout: 2], finch: [pool_size: 2]]
+        [connect_options: [timeout: 1], connect_options: [timeout: 2], finch: [size: 2]]
       ]
 
       for row <- rows do
@@ -564,10 +564,10 @@ defmodule TypeSafe.TimeoutTest do
 
     test "the reviewer's repro and its request_timeout and atom variants are rejected" do
       assert {:error, %Error{}} =
-               new_client(req_options: [finch: [pool_size: 2], finch: [receive_timeout: 5]])
+               new_client(req_options: [finch: [size: 2], finch: [receive_timeout: 5]])
 
       assert {:error, %Error{}} =
-               new_client(req_options: [finch: [pool_size: 2], finch: [request_timeout: 5]])
+               new_client(req_options: [finch: [size: 2], finch: [request_timeout: 5]])
 
       assert {:error, %Error{}} =
                new_client(req_options: [finch: :some_pool, finch: [receive_timeout: 5]])
@@ -579,19 +579,19 @@ defmodule TypeSafe.TimeoutTest do
     # Green today: A' must not turn duplicates into an error, or `base ++
     # overrides` composition (which Req supports) would break.
     test "a benign duplicate stays accepted, and Req keeps the last value" do
-      assert {:ok, %{finch: [pool_size: 3]}} =
-               resolved_options(finch: [pool_size: 2], finch: [pool_size: 3])
+      assert {:ok, %{finch: [size: 3]}} =
+               resolved_options(finch: [size: 2], finch: [size: 3])
 
       # Spec §4 A': Req keeps the last `finch:`, so a timeout in an earlier,
       # overridden entry is not an override and must not be rejected.
-      assert {:ok, %{finch: [pool_size: 2]}} =
-               resolved_options(finch: [receive_timeout: 5], finch: [pool_size: 2])
+      assert {:ok, %{finch: [size: 2]}} =
+               resolved_options(finch: [receive_timeout: 5], finch: [size: 2])
     end
 
     test "the request the adapter sees carries no finch timeout override" do
       for row <- [
-            [finch: [pool_size: 2], finch: [receive_timeout: 5]],
-            [finch: [receive_timeout: 5], finch: [pool_size: 2]]
+            [finch: [size: 2], finch: [receive_timeout: 5]],
+            [finch: [receive_timeout: 5], finch: [size: 2]]
           ] do
         case new_client(timeout: 2_000, req_options: [adapter: StubAdapter] ++ row) do
           {:error, %Error{}} ->

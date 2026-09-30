@@ -1,7 +1,7 @@
 # ADR 0003: Public API is a facade returning tagged tuples
 
 **Status:** Accepted
-**Date:** 2026-09-17; amended 2026-09-30 (issue #12)
+**Date:** 2026-09-17; amended 2026-09-30 (issues #12 and #7)
 
 ## Context
 
@@ -14,11 +14,10 @@ The JS SDK exposes a `TypeSafeClient` class, a lazy `APIPromise`, and a `Models`
 3. `new/1`, `system_one/3`, and `list_models/2` return `{:ok, value}` or `{:error, exception}`. The SDK defines no bang variants.
 4. Invalid options, an invalid request, and an unexpected `/v1/models` shape return `{:error, %TypeSafe.Error{}}`. JS throws in these cases. Call `opts` that is not a keyword list returns the same, with the messages `list_models/2 requires a keyword list of options` and `system_one/3 requires a keyword list of options`, mirroring `new/1`'s `new/1 requires a keyword list of options`. A key given twice returns `<key> given more than once` (ADR 0004 decision 16).
 5. `new/1` returns `{:error, _}` for a non-keyword `opts`, an unknown option key, a wrong-typed option value, and a `get_env` function that returns a non-string. ADR 0004 lists the checks.
-6. These paths raise today. Issue #7 tracks the ones marked with an issue number; the rest are by design:
+6. These paths raise today, by design:
    - `new/1` with a `get_env` function that itself raises.
-   - `new/1` with an unknown key inside `req_options`: Req raises `ArgumentError` (#7).
-   - A call with `req_options: [http_errors: :raise]` after a non-2xx response raises `RuntimeError` (#7).
-   - A first call on a client built with `finch: [name: Req.Finch, pool_size: 2]` (a name together with pool options) or the deprecated `finch: :unregistered_name` raises `ArgumentError` (#7). A plain `finch: [name: MyFinch]` for a running pool works.
+   - A first call on a client built with `finch: [name: X]` where no Finch pool named `X` runs raises `ArgumentError` (`unknown registry: X`). `new/1` cannot know which pools run, so this is a programming error, like sending to a process that is not running. An atom `finch: X` is rejected at `new/1` (ADR 0005 decision 5), and so is a `finch:` that holds `name:` with a pool option (ADR 0005 decision 7).
+   - A `req_options` value of the wrong type that `new/1` does not check, for example `finch: [size: :x]` or `adapter: 5`, raises on the first call (ADR 0005 decision 7).
    - `system_one/3` with a request that is not a map raises `FunctionClauseError`.
    - A builder call that fails its guard raises `FunctionClauseError` (ADR 0011). This includes a value that is not a map passed as the criteria itself, such as `noul("i", {1})`. A tuple or PID inside a criteria map passes the guard and is handled by decision 15.
    - Request content that is malformed at the Elixir level, which the encoding rescue of decision 15 does not cover (each run on 2026-09-30 against `a288c17`): an improper list in `state` or in question criteria, such as `[1 | 2]`, raises `FunctionClauseError` (`Jason.Encode.list_loop/3`); a charlist map key with an invalid code point, such as `[-1]`, `[0xD800]`, or `[0x110000]`, raises `UnicodeConversionError`; an improper-list map key, such as `[1 | 2]`, raises `ArgumentError`. These are by design: decoded JSON and typed user input cannot produce them, only code that builds the request can, so they are call-site programming errors like a builder guard failure.
@@ -46,7 +45,7 @@ The JS SDK exposes a `TypeSafeClient` class, a lazy `APIPromise`, and a `Models`
 
 ### Negative
 
-- The `new/1` doc claims it "never raises on bad input", which is broader than the built behavior. The paths in decision 6 raise. Issue #7 tracks the `req_options` cases (https://github.com/vinnie357/typesafe_sdk_ex/issues/7). The remaining paths in decision 6 that carry no issue number are by design (decisions 6 and 16).
+- The `new/1` doc no longer claims it never raises. It says `new/1` "does not check the values noted under `:req_options`, or a `:get_env` function that itself raises, and those raise". Those are the paths in decision 6, and they are by design (decisions 6 and 16). The `req_options` allowlist (ADR 0005) returns an error for every unsupported key and stated shape, and the checks read keys and shapes, not values.
 - Callers get maps, not structs, so a typo in a key returns `nil` and no compile-time error. The SDK trades that for a smaller surface and no response validation.
 - A `system_one/3` call with a `nil` request raises `FunctionClauseError`. The first PR review accepted this as a caller error outside the documented contract.
 
@@ -65,4 +64,3 @@ The JS SDK exposes a `TypeSafeClient` class, a lazy `APIPromise`, and a `Models`
 - PR #1 review round 1, findings N4, N6, N9, N10, B1: https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5714770534
 - PR #1 review round 2, findings R4 and R6: https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5715301129
 - PR #1 review round 3, findings D5 (public docs cite no internal document) and D6: https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5722393470
-- Open `req_options` gaps: https://github.com/vinnie357/typesafe_sdk_ex/issues/7

@@ -128,8 +128,49 @@ defmodule TypeSafe.Config do
     end
   end
 
-  # Options the SDK owns. A silent override would mislead the caller, so these
-  # are rejected by name (ADR 0005).
+  # `req_options` is a transport allowlist (ADR 0005), checked on the view Req
+  # resolves: `config :req, :default_options` with `req_options` merged over it,
+  # the last of a repeated key winning. An error names the source of the
+  # offending key, so a bad default is not blamed on `req_options`.
+  #
+  # The SDK owns the request itself, so an option that could change what is
+  # sent or how a response is read is rejected by name rather than silently
+  # overridden. `base_url`, `decode_body`, `retry`, and `auth` are accepted and
+  # overridden in `TypeSafe.HTTP.new_client_req/3`.
+  @req_transport_keys [
+    :adapter,
+    :connect_options,
+    :finch,
+    :finch_private,
+    :headers,
+    :inet6,
+    :unix_socket
+  ]
+  @req_overridden_keys [:auth, :base_url, :decode_body, :retry]
+  @finch_pool_keys [
+    :size,
+    :count,
+    :protocols,
+    :conn_opts,
+    :pool_max_idle_time,
+    :conn_max_idle_time,
+    :start_pool_metrics?,
+    :http2
+  ]
+  @finch_keys [:name, :pool_timeout, :pool_tag] ++ @finch_pool_keys
+  @connect_keys [
+    :timeout,
+    :protocols,
+    :transport_opts,
+    :proxy,
+    :proxy_headers,
+    :hostname,
+    :client_settings
+  ]
+  @defaults_source "config :req, :default_options"
+
+  # Options the SDK owns and sets per call. A silent override would mislead the
+  # caller, so these are rejected by name.
   @rejected_req_options [
     receive_timeout: "use the client's own timeout option instead",
     request_timeout: "use the client's own timeout option instead",
@@ -139,75 +180,183 @@ defmodule TypeSafe.Config do
   ]
 
   defp validate_req_options_scope(opts) do
-    # Validated as Req resolves it: `Req.new/1` keeps the last of a repeated
-    # key (`Map.new/1`, req.ex:590-598), so a repeated key is judged by the
-    # value Req keeps (ADR 0005).
-    req_options = opts |> Keyword.get(:req_options, []) |> Map.new()
+    own = opts |> Keyword.get(:req_options, []) |> Map.new()
+    defaults = Req.default_options()
 
-    case Enum.find(@rejected_req_options, fn {key, _hint} ->
-           Map.has_key?(req_options, key)
-         end) do
-      nil ->
-        validate_finch_scope(req_options)
+    with :ok <-
+           validate_predicate(
+             Keyword.keyword?(defaults),
+             "#{@defaults_source} must be a keyword list"
+           ) do
+      view = defaults |> Map.new() |> Map.merge(own)
+      validate_req_options_view(view, own, defaults)
+    end
+  end
 
-      {key, hint} ->
-        {:error, %TypeSafe.Error{message: "req_options must not set #{key}; #{hint}"}}
+  # The order is observable through the error message, so it is fixed: named
+  # keys, then the finch shape and its timeouts, then the finch/connect_options
+  # pair, the top-level allowlist, the finch and connect_options sub-keys, and
+  # last the headers shape.
+  defp validate_req_options_view(view, own, defaults) do
+    finch = Map.get(view, :finch, [])
+    connect_options = Map.get(view, :connect_options, [])
+
+    with :ok <- validate_named_keys(view, own),
+         :ok <- validate_keyword_list(view, own, :finch),
+         :ok <- validate_finch_timeouts(finch, own),
+         :ok <- validate_finch_connect_pair(view, own),
+         :ok <- validate_transport_keys(view, own),
+         :ok <- validate_sub_keys(:finch, finch, @finch_keys, own),
+         :ok <- validate_finch_name_and_pool(finch, own),
+         :ok <- validate_keyword_list(view, own, :connect_options),
+         :ok <- validate_sub_keys(:connect_options, connect_options, @connect_keys, own) do
+      validate_headers_entries(own, defaults)
+    end
+  end
+
+  defp source(own, key), do: if(Map.has_key?(own, key), do: "req_options", else: @defaults_source)
+
+  defp scope_error(own, key, rest),
+    do: {:error, %TypeSafe.Error{message: "#{source(own, key)} #{rest}"}}
+
+  defp validate_named_keys(view, own) do
+    case Enum.find(@rejected_req_options, fn {key, _hint} -> Map.has_key?(view, key) end) do
+      nil -> :ok
+      {key, hint} -> scope_error(own, key, "must not set #{key}; #{hint}")
+    end
+  end
+
+  # `finch:` and `connect_options:` must be keyword lists. Req still accepts a
+  # pool name atom for `finch:` (deprecated), but it raises on the first
+  # request when the name is not a running Finch pool; a non-keyword
+  # `connect_options:` raises on the first request as well.
+  defp validate_keyword_list(view, own, key) do
+    case Keyword.keyword?(Map.get(view, key, [])) do
+      true -> :ok
+      false -> scope_error(own, key, "#{key} must be a keyword list")
     end
   end
 
   # Req merges `finch:` request options over the top-level ones, so the
-  # timeouts are rejected there too (ADR 0005). Req also raises on the first
-  # request when `finch:` and `connect_options:` are both set, so that pair is
-  # rejected here instead of raising later. `finch:` is a keyword list, or,
-  # deprecated in Req, a pool name atom.
-  @finch_timeout_keys [:receive_timeout, :request_timeout]
-
-  defp validate_finch_scope(req_options) do
-    finch = Map.get(req_options, :finch)
-
-    cond do
-      is_nil(finch) or is_atom(finch) ->
-        validate_finch_connect_pair(finch, req_options)
-
-      Keyword.keyword?(finch) ->
-        with :ok <- validate_finch_timeouts(finch) do
-          validate_finch_connect_pair(finch, req_options)
-        end
-
-      true ->
-        {:error, %TypeSafe.Error{message: "req_options finch must be a keyword list"}}
-    end
-  end
-
-  defp validate_finch_timeouts(finch) do
-    case Enum.find(@finch_timeout_keys, &Keyword.has_key?(finch, &1)) do
+  # timeouts are rejected there too.
+  defp validate_finch_timeouts(finch, own) do
+    case Enum.find([:receive_timeout, :request_timeout], &Keyword.has_key?(finch, &1)) do
       nil ->
         :ok
 
       key ->
-        {:error,
-         %TypeSafe.Error{
-           message:
-             "req_options must not set finch: [#{key}: ...]; " <>
-               "use the client's own timeout option instead"
-         }}
+        scope_error(
+          own,
+          :finch,
+          "must not set finch: [#{key}: ...]; use the client's own timeout option instead"
+        )
     end
   end
 
-  defp validate_finch_connect_pair(finch, req_options) do
-    case finch && Map.has_key?(req_options, :connect_options) do
+  # Req raises on the first request when `finch:` and `connect_options:` are
+  # both set, so that pair is rejected here instead of raising later.
+  defp validate_finch_connect_pair(view, own) do
+    case Map.has_key?(view, :finch) and Map.has_key?(view, :connect_options) do
       true ->
-        {:error,
-         %TypeSafe.Error{
-           message:
-             "req_options must not set both finch and connect_options; " <>
-               "Req accepts only one of them"
-         }}
+        message =
+          "must not set both finch and connect_options; Req accepts only one of them"
 
-      _no_pair ->
+        case {Map.has_key?(own, :finch), Map.has_key?(own, :connect_options)} do
+          {same, same} ->
+            scope_error(own, :finch, message)
+
+          _mixed ->
+            {:error, %TypeSafe.Error{message: "req_options and #{@defaults_source} " <> message}}
+        end
+
+      false ->
         :ok
     end
   end
+
+  defp validate_transport_keys(view, own) do
+    case Enum.find(Map.keys(view), &(&1 not in (@req_transport_keys ++ @req_overridden_keys))) do
+      nil ->
+        :ok
+
+      key ->
+        scope_error(
+          own,
+          key,
+          "does not support #{key}; supported keys are #{Enum.join(@req_transport_keys, ", ")}"
+        )
+    end
+  end
+
+  # Sub-keys are checked by key only, not by value.
+  defp validate_sub_keys(key, options, allowed, own) do
+    case Enum.find(Keyword.keys(options), &(&1 not in allowed)) do
+      nil -> :ok
+      sub_key -> scope_error(own, key, "does not support #{key}: [#{sub_key}: ...]")
+    end
+  end
+
+  # A named pool is started elsewhere with its own settings, so Finch pool
+  # options given alongside `name:` would be ignored or rejected.
+  defp validate_finch_name_and_pool(finch, own) do
+    with true <- Keyword.has_key?(finch, :name),
+         key when not is_nil(key) <- Enum.find(Keyword.keys(finch), &(&1 in @finch_pool_keys)) do
+      scope_error(
+        own,
+        :finch,
+        "must not set finch: [name: ...] together with finch: [#{key}: ...]"
+      )
+    else
+      _no_conflict -> :ok
+    end
+  end
+
+  # Req folds every `headers:` entry of `config :req, :default_options` and
+  # raises on a bad one, so each is checked unless `req_options` sets `headers:`,
+  # which replaces them all.
+  defp validate_headers_entries(own, defaults) do
+    entries =
+      case Map.fetch(own, :headers) do
+        {:ok, headers} -> [headers]
+        :error -> Keyword.get_values(defaults, :headers)
+      end
+
+    Enum.reduce_while(entries, :ok, fn headers, :ok ->
+      case validate_headers(headers, own) do
+        :ok -> {:cont, :ok}
+        {:error, %TypeSafe.Error{}} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  # Req folds `headers:` into a header map and raises on a value it cannot
+  # encode, so the shape is checked here: a map or a list of `{name, value}`
+  # pairs, a name being a binary or an atom and a value a binary or a list of
+  # binaries.
+  defp validate_headers(headers, own) do
+    headers = if is_map(headers), do: Map.to_list(headers), else: headers
+
+    case all_proper?(headers, &valid_req_header?/1) do
+      true ->
+        :ok
+
+      false ->
+        scope_error(own, :headers, "headers must be a map or a list of {name, value} pairs")
+    end
+  end
+
+  defp valid_req_header?({name, value}) when is_binary(name) or is_atom(name),
+    do: is_binary(value) or all_proper?(value, &is_binary/1)
+
+  defp valid_req_header?(_header), do: false
+
+  # `Enum.all?/2` raises on an improper list; this is false for one.
+  defp all_proper?([], _predicate), do: true
+
+  defp all_proper?([head | tail], predicate),
+    do: predicate.(head) and all_proper?(tail, predicate)
+
+  defp all_proper?(_not_a_list, _predicate), do: false
 
   defp validate_timeout_opt(opts) do
     case Keyword.fetch(opts, :timeout) do
