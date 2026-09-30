@@ -23,10 +23,6 @@ Each ADR documents behavior the code has today. Where a decision has a known gap
 | [0011](0011-question-builders-and-pre-send-validation.md) | Question builders and pre-send request validation | Accepted | 2026-09-17 |
 | [0012](0012-test-seams-without-mocking-libraries.md) | Test seams without mocking libraries | Accepted | 2026-09-17; amended 2026-09-30 |
 
-## Open work that touches these decisions
-
-- The v0.2.0 release gate, including the README audit: https://github.com/vinnie357/typesafe_sdk_ex/issues/8
-
 ## Citation conventions
 
 - `path:line` names a line in the JS repository `typesafe-ai/typesafe-sdk-js` at commit `66880ccded6cb642dc1809620c2b108c33730214`, under `src/` or `test/` as the file name implies. Example: `retry.ts:38-49` is `src/retry.ts`, and `reliability.test.ts:51-73` is `test/reliability.test.ts`.
