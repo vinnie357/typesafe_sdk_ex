@@ -6,7 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Retries: requests failing with 408, 429, 5xx, or a connection error are
+  retried up to twice with exponential backoff and jitter, honoring
+  `Retry-After` and `retry-after-ms` up to `max_retry_after_ms`. The policy is
+  set with `retry:` on `TypeSafe.new/1` and overridden, merged field by field,
+  per call on `TypeSafe.system_one/3` and `TypeSafe.list_models/2`. Retries send
+  an `X-TypeSafe-Retry-Count` header. See `TypeSafe.RetryPolicy`.
+
 ### Changed
+
+- Timeouts are not retried by default (`api_timeout_error: false`), unlike the
+  JS SDK: a timed-out `POST /v1/systemone` may already have been processed and
+  billed. Opt in with `retry: [api_timeout_error: true]`.
+- `req_options` now rejects `retry_delay`, `max_retries`, and `retry_log_level`,
+  naming the option.
 
 - `TypeSafe.Error.RateLimit.retry_after_ms` now parses `retry-after-ms`,
   decimal-seconds `Retry-After` values, and HTTP dates (IMF-fixdate, RFC 850,

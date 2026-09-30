@@ -73,10 +73,54 @@ case TypeSafe.system_one(client, request) do
 end
 ```
 
+## Retries
+
+By default a failed request is retried up to 2 times when it fails with a 408,
+a 429, any 5xx status, or a connection error (a closed socket, DNS, TLS, and
+similar). Retries wait with exponential backoff: 500ms, then 1000ms, capped at
+5000ms, each shortened at random by up to 25% (jitter). A `Retry-After` or
+`retry-after-ms` response header is honored exactly, without jitter, when the
+value is at most `max_retry_after_ms` (60 seconds by default); a larger value
+falls back to backoff. After the last retry the last error is returned, and a
+2xx response is never retried.
+
+**Timeouts are not retried by default.** A `POST /v1/systemone` that timed out
+may already have been processed and billed, and the API has no idempotency key,
+so a retry could run it twice. Opt in with `retry: [api_timeout_error: true]`.
+A connection error that drops mid-response carries a smaller version of the
+same risk; opt out with `retry: [api_connection_error: false]`, or turn
+retries off entirely with `retry: [max_retries: 0]`.
+
+Set the policy on the client, and override it per call. A per-call `retry:` is
+merged field by field onto the client's policy and leaves the client unchanged:
+
+```elixir
+{:ok, client} = TypeSafe.new(retry: [max_retries: 5, backoff_initial_ms: 250])
+
+# This call retries up to 5 times, and also retries timeouts.
+{:ok, models} = TypeSafe.list_models(client, retry: [api_timeout_error: true])
+
+# This call never retries.
+{:ok, response} = TypeSafe.system_one(client, request, retry: [max_retries: 0])
+```
+
+The fields are `max_retries`, `backoff_initial_ms`, `backoff_max_ms`,
+`backoff_jitter`, `http_statuses` (a list, `Range`, or `MapSet` of statuses
+from 100 to 999), `respect_retry_after`, `max_retry_after_ms`,
+`api_connection_error`, and `api_timeout_error`; see `TypeSafe.RetryPolicy`.
+An invalid value, an unknown key, or `retry: nil` returns
+`{:error, %TypeSafe.Error{}}` naming `retry.<field>`, before any request is
+sent.
+
+Every retry carries an `X-TypeSafe-Retry-Count` header with the retry number
+(`"1"`, `"2"`, ...). The first attempt has no such header, and a value you set
+yourself is removed.
+
+`req_options` cannot set `retry_delay`, `max_retries`, or `retry_log_level`;
+`new/1` returns an error naming the option.
+
 ### Known limitations
 
-- **No retries.** A 429 or 503 response returns immediately; the caller is
-  responsible for any retry loop.
 - **Fixed timeout.** Every request uses a fixed 10-second timeout; there is no
   client-level or per-call timeout option yet.
 - **No logging.**
