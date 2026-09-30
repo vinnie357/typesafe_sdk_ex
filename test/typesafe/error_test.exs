@@ -291,7 +291,9 @@ defmodule TypeSafe.ErrorTest do
       ~s({"detail":{"message":""}}),
       # JS stops at the first present string (errors.ts:20), so the later
       # non-empty `message` does not win.
-      ~s({"error":"","message":"later"})
+      ~s({"error":"","message":"later"}),
+      ~s({"error":{"message":""},"message":"later"}),
+      ~s({"message":"","detail":"later"})
     ]
 
     for body <- cases do
@@ -302,7 +304,8 @@ defmodule TypeSafe.ErrorTest do
     end
   end
 
-  # Issue #10. JS parses the text `null` to `null` (client.ts:485), which is
+  # Issue #10. JS parses the text `null` to `null` (client.ts:478 for a
+  # JSON content-type, client.ts:485 without one), which is
   # not `undefined`, so `describe` reaches `JSON.stringify(null)` (errors.ts:64)
   # and gives "<status> null". The Elixir body is `nil` (decoded JSON null).
   test "a JSON null error body gives <status> null, not no body" do
