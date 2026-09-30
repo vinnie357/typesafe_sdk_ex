@@ -1,12 +1,13 @@
 defmodule TypeSafe.Error.Timeout do
   @moduledoc """
-  The full response did not arrive within the timeout. A kind of transport
-  failure, kept as its own struct rather than a `TypeSafe.Error.Connection`
-  subtype because Elixir has no inheritance.
+  A request attempt waited longer than the timeout for a response. A kind of
+  transport failure, kept as its own struct rather than a
+  `TypeSafe.Error.Connection` subtype because Elixir has no inheritance.
 
-  `timeout_ms` is the configured per-attempt timeout that was exceeded
-  (`client.timeout`, until S3 adds a per-call override). `message` is
-  `"Request timed out after <timeout_ms>ms."`.
+  The timeout bounds each socket read, not connecting, and a per-call
+  `timeout:` overrides the client's. `timeout_ms` is that configured per-read
+  value, not the elapsed time, so a connect timeout reports it too. `message`
+  is `"Request timed out after <timeout_ms>ms."`.
   """
 
   @enforce_keys [:message, :timeout_ms]

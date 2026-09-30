@@ -42,7 +42,7 @@ On 2026-09-29 the JS repository was identical to the pinned commit: the GitHub c
 |---|---|
 | Constructor and validation failures return `{:error, _}` instead of throwing | ADR 0003 |
 | `system_one/3` requires an atom-keyed request with `:state`; JS drops `state: undefined` | ADR 0011 |
-| An explicit blank `api_key` is rejected even when the env key is set (the code still falls back to it: known gap, issue #10); JS sends `Bearer ` | ADR 0004 |
+| An explicit blank `api_key` is rejected even when the env key is set; JS sends `Bearer ` | ADR 0004 |
 | An unrecognized `TYPESAFE_LOG_LEVEL` falls back to `:warning`; JS throws | ADR 0004 |
 | The `log_level` option takes atoms only; JS takes the strings | ADR 0004 |
 | `User-Agent`, `X-TypeSafe-SDK`, and `X-TypeSafe-Runtime` carry Elixir values | ADR 0005 |

@@ -1,6 +1,6 @@
 # ADR 0004: Configuration resolution and option validation
 
-**Status:** Accepted; decision 7 has a known implementation gap, tracked in issue #10
+**Status:** Accepted
 **Date:** 2026-09-17
 
 ## Context
@@ -15,7 +15,7 @@ The JS constructor resolves four settings from an explicit option, then an envir
 4. `get_env` must return a string or `nil`. Any other return value gives `{:error, %TypeSafe.Error{}}` that names the variable.
 5. The SDK trims environment values, and a blank value counts as unset (`env.ts:16-19`).
 6. An explicit `nil` option counts as not given for the four settings above. `default_headers`, `req_options`, and `get_env` reject `nil`.
-7. An explicit blank or whitespace-only `api_key` is rejected with the missing-key error, `{:error, %TypeSafe.Error{message: "TYPESAFE_API_KEY is required."}}`, even when `TYPESAFE_API_KEY` is set (operator rulings: PR #1 review N7, and the ruling recorded on issue #10). Known implementation gap: the code still treats a blank `api_key` as not given and falls back to `TYPESAFE_API_KEY` when that variable is set. The frozen test covers only the no-environment case. The fix is tracked in issue #10. `new/1` also trims a non-blank `api_key` option.
+7. An explicit blank or whitespace-only `api_key` is rejected with the missing-key error, `{:error, %TypeSafe.Error{message: "TYPESAFE_API_KEY is required."}}`, even when `TYPESAFE_API_KEY` is set (operator rulings: PR #1 review N7, and the ruling recorded on issue #10). `new/1` also trims a non-blank `api_key` option.
 8. The SDK strips trailing slashes from `base_url`, whether it came from the option or the environment.
 9. The `log_level` option takes one of `:debug`, `:info`, `:warning`, `:error`, `:off`. Any other value returns `{:error, _}`.
 10. `TYPESAFE_LOG_LEVEL` accepts `debug`, `info`, `warn`, `warning`, `error`, and `off`, in any letter case. `warn` and `warning` both map to `:warning`.
@@ -34,8 +34,8 @@ The JS constructor resolves four settings from an explicit option, then an envir
 
 ### Negative
 
-- Decisions 7 and 11 deviate from JS. JS keeps an explicit `""` and sends `Bearer `. The code's blank-key fall-through also differs from decision 7 (known gap, issue #10: https://github.com/vinnie357/typesafe_sdk_ex/issues/10). JS throws `Invalid log level "loud" from TYPESAFE_LOG_LEVEL` and names the source (`logging.ts:13-18`, `client.ts:157-162`, `test/client.test.ts:119-128`). The port cannot validate the environment level yet, because nothing reads it. When logging is built, decision 11 needs a new ADR.
-- The Python SDK documents that an explicitly empty key does not fall back to the environment (https://docs.typesafe.ai/sdk/python/usage.md, "Environment variables"). Decision 7 rejects a blank key even when the variable is set, but the code differs today: a blank `api_key` option falls back to `TYPESAFE_API_KEY` when that variable is set (issue #10).
+- Decisions 7 and 11 deviate from JS. JS keeps an explicit `""` and sends `Bearer `. JS throws `Invalid log level "loud" from TYPESAFE_LOG_LEVEL` and names the source (`logging.ts:13-18`, `client.ts:157-162`, `test/client.test.ts:119-128`). The port cannot validate the environment level yet, because nothing reads it. When logging is built, decision 11 needs a new ADR.
+- The Python SDK documents that an explicitly empty key does not fall back to the environment (https://docs.typesafe.ai/sdk/python/usage.md, "Environment variables"). Decision 7 matches it: a blank `api_key` option is rejected even when the variable is set.
 - The `log_level` option accepts atoms only. `log_level: "warn"` returns `{:error, _}`.
 
 ## Alternatives considered

@@ -22,8 +22,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connecting (Finch's 5_000 ms default, set with
   `req_options: [connect_options: [timeout: ms]]`).
 
+### Fixed
+
+- `TypeSafe.new/1` rejects an explicit blank or whitespace-only `api_key` with
+  `TYPESAFE_API_KEY is required.` even when `TYPESAFE_API_KEY` is set; it
+  previously fell back to the environment key. `api_key: nil` still falls back.
+- `TypeSafe.list_models/2` and `TypeSafe.system_one/3` return
+  `{:error, %TypeSafe.Error{}}` (`list_models/2 requires a keyword list of
+  options`, `system_one/3 requires a keyword list of options`) for call options
+  that are not a keyword list, instead of raising.
+- An empty-string `error`, `error.message`, `message`, `detail`, or
+  `detail.message` in an error body no longer gives the message `"<status> "`.
+  As in the JS SDK, the search stops at that field and the message is
+  `"<status> <raw body>"`.
+- An error body of JSON `null` gives the message `"<status> null"` instead of
+  `"<status> status code (no body)"`; `error.body` is still `nil`.
+- The `TypeSafe.Error.Timeout` moduledoc described the timeout as `client.timeout`
+  "until a per-call override" lands. It now states the shipped behavior.
+
 ### Changed
 
+- `TypeSafe.noul/2` raises `FunctionClauseError` for `criteria` that is neither
+  a map nor `nil`, like `choice/2` and `score/2`; it previously returned a map
+  carrying the value.
 - A `retry:` list that repeats a key is rejected with
   `retry.<key> given more than once` instead of `retry has unknown option(s)`.
 - Timeouts are not retried by default (`api_timeout_error: false`), unlike the
