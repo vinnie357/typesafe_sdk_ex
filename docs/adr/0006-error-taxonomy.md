@@ -40,6 +40,9 @@ The JS SDK maps each non-2xx status to an `APIError` subclass, wraps transport f
 10. With no extracted detail and a body, the message is the original body text, cut to 200 characters plus `…` (`errors.ts:60-66`). A non-binary body from a custom adapter has no original text, so the SDK uses its `inspect/1` form.
 11. Decision 10 deviates from JS, which re-stringifies the parsed body. Stdlib `JSON` offers only bang encoders (`JSON.encode!/1`, `JSON.encode_to_iodata!/1`), so the SDK avoids re-encoding. The message equals JS output when the server sends compact JSON, as in `test/errors.test.ts:91-95`. For `{ "code" : 7 }` it keeps the spacing.
 
+12. An extracted detail that is an empty string counts as no detail, and extraction stops at the first present string. The message then takes the raw-body form of decision 10 (`errors.ts:20-24` return the empty string, `errors.ts:62` treats it as falsy, `errors.ts:64-65` build the raw form). A later non-empty field does not win: `{"error":"","message":"m"}` gives `500 {"error":"","message":"m"}`. The rule covers `error`, `error.message`, `message`, `detail`, and `detail.message`. Known implementation gap: the code returns `"<status> "` today (issue #10).
+13. A body that is the JSON text `null` gives the message `"<status> null"` and `body: nil`, where JS gives `body: null` (`client.ts:485`, `errors.ts:63-64`). An empty body still gives decision 9 (`client.ts:474`). Known implementation gap: the code reads `null` as no body today (issue #10).
+
 ## Consequences
 
 ### Positive
@@ -49,7 +52,7 @@ The JS SDK maps each non-2xx status to an `APIError` subclass, wraps transport f
 
 ### Negative
 
-- Three gaps exist and issue #10 tracks them (https://github.com/vinnie357/typesafe_sdk_ex/issues/10). The first two are message gaps against JS that no test pins. An empty-string `error`, `message`, or `detail` value yields the message `"<status> "`, where JS falls through to the raw-body form because an empty detail is falsy. A JSON `null` body reads as no body, where JS reports `"<status> null"`.
+- Three gaps exist and issue #10 tracks them (https://github.com/vinnie357/typesafe_sdk_ex/issues/10). The first two are message gaps against JS, and decisions 12 and 13 record the target behavior. An empty-string `error`, `message`, or `detail` value yields the message `"<status> "`, where JS falls through to the raw-body form because an empty detail is falsy. A JSON `null` body reads as no body, where JS reports `"<status> null"`.
 - Code cannot match all SDK errors with one struct pattern, only on the tuple.
 - The public `TypeSafe.Error.Timeout` moduledoc is stale. It says `timeout_ms` is `client.timeout` "until ... a per-call override" lands, and that the full response did not arrive. The per-call override exists, and the value bounds each socket read (ADR 0010).
 
