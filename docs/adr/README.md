@@ -21,7 +21,7 @@ Each ADR documents behavior the code has today. Where a decision has a known gap
 | [0009](0009-retry-after-parsing.md) | Retry-After parsing | Accepted | 2026-09-29; amended 2026-09-30 |
 | [0010](0010-per-attempt-timeout-on-req-receive-timeout.md) | Per-attempt timeout on Req `receive_timeout` | Accepted | 2026-09-17; amended 2026-09-29; amended 2026-09-30 |
 | [0011](0011-question-builders-and-pre-send-validation.md) | Question builders and pre-send request validation | Accepted | 2026-09-17 |
-| [0012](0012-test-seams-without-mocking-libraries.md) | Test seams without mocking libraries | Accepted | 2026-09-17; amended 2026-09-30; amended 2026-09-30 |
+| [0012](0012-test-seams-without-mocking-libraries.md) | Test seams without mocking libraries | Accepted | 2026-09-17; amended 2026-09-29; amended 2026-09-30 |
 | [0013](0013-telemetry-events-and-default-logger.md) | Telemetry events and an opt-in default logger | Accepted | 2026-09-30; amended 2026-09-30 |
 
 ## Citation conventions

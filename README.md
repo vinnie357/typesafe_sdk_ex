@@ -295,12 +295,12 @@ contains whitespace is masked as `***`, a value with no whitespace is masked as
 `***` plus its last four graphemes when it is longer than eight, and `cookie` and
 `set-cookie` become `***`. Whitespace here is Unicode whitespace plus U+FEFF, or
 ASCII whitespace alone when the value is not valid UTF-8. That is close to, not
-exactly, what JS treats as whitespace; a value split only by a zero-width space
-(U+200B) counts as having none (see ADR 0013 for the full list of such
-separators).
+exactly, what JS treats as whitespace; a value split only by a code point that is
+not whitespace, such as a zero-width space (U+200B), counts as having none (see
+ADR 0013 for the rule).
 A header with any other name, such as a custom `default_headers` entry, is
 printed as given, and the URL is printed without any `user:password@` part. The last four
-characters of your API key therefore appear in a `:debug` log. Use `:debug`
+graphemes of your API key therefore appear in a `:debug` log. Use `:debug`
 only where logs are private.
 
 `TypeSafe.detach_default_logger/0` removes it. To send the events somewhere else,

@@ -75,10 +75,11 @@ defmodule TypeSafe.Telemetry do
   `"Bearer ***ijkl"`); a third or later word is dropped. Any other value that
   contains whitespace, including a leading space, becomes `"***"`. A value with no
   whitespace becomes `"***"` plus its last four graphemes when it is longer than
-  eight. A value that only one of these code points separates counts as having no
-  whitespace, because none is whitespace in JS or PCRE: U+200B (zero-width space),
-  U+200C, U+200D, U+2060, U+00AD, U+001C to U+001F, and U+0000 (NUL). Any other
-  header, such as a custom `default_headers` entry, is reported as given.
+  eight. Only whitespace splits a value. A code point that is not whitespace does
+  not, so a value separated only by one keeps a tail of at most four graphemes.
+  Examples: U+200B (zero-width space), U+200C, U+200D, U+2060, the bidi controls
+  U+200E and U+202E, and the filler U+3164. Any other header, such as a custom
+  `default_headers` entry, is reported as given.
   The `%Req.Request{}` is never put in metadata. See `redact_headers/1`.
   """
 
