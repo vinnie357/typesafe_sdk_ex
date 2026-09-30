@@ -73,7 +73,16 @@ defmodule TypeSafe do
   - `:default_headers` — a map merged onto every request, default `%{}`.
   - `:req_options` — a keyword list merged into `Req.new/1` (e.g. `adapter:` for tests).
     `decode_body` and `retry` are SDK-owned and are always forced to `false`
-    regardless of what `req_options` requests.
+    regardless of what `req_options` requests. `receive_timeout`, `retry_delay`,
+    `max_retries`, and `retry_log_level` are rejected by name.
+  - `:retry` — a keyword list of `TypeSafe.RetryPolicy` fields (`:max_retries`,
+    `:backoff_initial_ms`, `:backoff_max_ms`, `:backoff_jitter`, `:http_statuses`,
+    `:respect_retry_after`, `:max_retry_after_ms`, `:api_connection_error`,
+    `:api_timeout_error`) overriding the defaults, which retry 408, 429, 5xx, and
+    connection errors up to twice with exponential backoff. Timeouts are not
+    retried unless `api_timeout_error: true`. The resolved policy is stored in
+    `client.retry`. An invalid value, an unknown key, or `nil` returns
+    `{:error, %TypeSafe.Error{}}` naming `retry.<field>`.
   - `:get_env` — a `(String.t() -> String.t() | nil)` function, default `&System.get_env/1`.
 
   Every option value above is checked with a guard clause. A wrong-typed value
@@ -93,9 +102,15 @@ defmodule TypeSafe do
     A `nil` value deletes the header instead of sending it empty.
   - `:with_response` — when `true`, returns `t:with_response_result/0` instead of the bare
     list. Must be a boolean; a non-boolean value is rejected before any request is sent.
+  - `:retry` — a keyword list merged field by field onto `client.retry` for this call only,
+    e.g. `retry: [max_retries: 0]`. Invalid values (including `nil`) are rejected before any
+    request is sent, with an error naming `retry.<field>`.
 
   A response whose body is not `%{"models" => [...]}` returns `{:error, %TypeSafe.Error{}}`
   instead of raising.
+
+  Retryable failures are retried per the client's retry policy; once retries run out, the last
+  error is returned. Timeouts are not retried unless `retry: [api_timeout_error: true]`.
 
   A non-2xx HTTP response returns the status-mapped error struct:
   `TypeSafe.Error.BadRequest` (400), `TypeSafe.Error.Authentication` (401),
@@ -135,6 +150,14 @@ defmodule TypeSafe do
     A `nil` value deletes the header instead of sending it empty.
   - `:with_response` — when `true`, returns `t:with_response_result/0` instead of the bare
     body. Must be a boolean; a non-boolean value is rejected before any request is sent.
+  - `:retry` — a keyword list merged field by field onto `client.retry` for this call only,
+    e.g. `retry: [max_retries: 0]`. Invalid values (including `nil`) are rejected before any
+    request is sent, with an error naming `retry.<field>`.
+
+  Retryable failures are retried per the client's retry policy, and each retry sends the same
+  request body. A timeout is not retried by default: a timed-out request may already have been
+  processed and billed, and the API has no idempotency key. Opt in with
+  `retry: [api_timeout_error: true]`. Retries add an `X-TypeSafe-Retry-Count` header.
 
   A non-2xx HTTP response returns the status-mapped error struct:
   `TypeSafe.Error.BadRequest` (400), `TypeSafe.Error.Authentication` (401),

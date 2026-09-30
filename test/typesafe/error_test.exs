@@ -3,11 +3,11 @@ defmodule TypeSafe.ErrorTest do
 
   alias TypeSafe.StubAdapter
 
-  # Gate 4 review follow-up on 1834b35 (S3 delayed fuse): every client this
-  # file builds funnels through here, so S3 has exactly one place to add
-  # `retry: [max_retries: 0]` once new/1 supports a :retry option (it
-  # doesn't yet — spec §10 S2 AC: "The tests run with max_retries: 0"). Do
-  # not add the option now; only the funnel point is the fix for this round.
+  # Every client this file builds funnels through build_client/2 below, which
+  # runs with `retry: [max_retries: 0]` (spec §10 S2 AC, §11 "Fixture and
+  # expectation changes"), so a retryable status such as 503 returns its error
+  # struct at once instead of being retried. A test may still override :retry
+  # through `opts`.
   defp error_client(status, body, headers \\ [{"content-type", "application/json"}]) do
     build_client(StubAdapter.respond(status, body, headers), [])
   end
@@ -21,7 +21,7 @@ defmodule TypeSafe.ErrorTest do
   end
 
   defp build_client(stub, opts) do
-    StubAdapter.client(stub, opts)
+    StubAdapter.client(stub, Keyword.put_new(opts, :retry, max_retries: 0))
   end
 
   # docs/spec.md §11 S2 #1 (errors.test.ts:20-40; 529 is new, from

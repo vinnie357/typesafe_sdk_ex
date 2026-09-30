@@ -11,6 +11,7 @@ defmodule TypeSafe.Config do
     :log_level,
     :default_headers,
     :req_options,
+    :retry,
     :get_env
   ]
 
@@ -107,16 +108,27 @@ defmodule TypeSafe.Config do
     end
   end
 
+  # Options the SDK owns. A silent override would mislead the caller, so these
+  # are rejected by name (spec §4 R2).
+  @rejected_req_options [
+    receive_timeout: "use the client's own timeout option instead",
+    retry_delay: "use the retry option instead",
+    max_retries: "use the retry option instead",
+    retry_log_level: "the SDK owns retry logging"
+  ]
+
   defp validate_req_options_scope(opts) do
     req_options = Keyword.get(opts, :req_options, [])
 
-    rejects_receive_timeout =
-      Keyword.keyword?(req_options) and Keyword.has_key?(req_options, :receive_timeout)
+    case Enum.find(@rejected_req_options, fn {key, _hint} ->
+           Keyword.has_key?(req_options, key)
+         end) do
+      nil ->
+        :ok
 
-    validate_predicate(
-      not rejects_receive_timeout,
-      "req_options must not set receive_timeout; use the client's own timeout option instead"
-    )
+      {key, hint} ->
+        {:error, %TypeSafe.Error{message: "req_options must not set #{key}; #{hint}"}}
+    end
   end
 
   defp validate_log_level_value(opts) do
@@ -164,7 +176,8 @@ defmodule TypeSafe.Config do
            resolve_string(opts, :base_url, "TYPESAFE_BASE_URL", get_env, @default_base_url),
          {:ok, default_model} <-
            resolve_string(opts, :default_model, "TYPESAFE_DEFAULT_MODEL", get_env, @default_model),
-         {:ok, log_level} <- resolve_log_level(opts, get_env) do
+         {:ok, log_level} <- resolve_log_level(opts, get_env),
+         {:ok, retry} <- resolve_retry(opts) do
       base_url = String.trim_trailing(raw_base_url, "/")
       default_headers = Keyword.get(opts, :default_headers, %{})
       req_options = Keyword.get(opts, :req_options, [])
@@ -175,11 +188,20 @@ defmodule TypeSafe.Config do
          base_url: base_url,
          default_model: default_model,
          log_level: log_level,
-         retry: %TypeSafe.RetryPolicy{},
+         retry: retry,
          timeout: @default_timeout,
          default_headers: default_headers,
          req: req
        }}
+    end
+  end
+
+  # Unlike the four env-backed options, `retry: nil` is not "not given":
+  # `RetryPolicy.merge/2` rejects it.
+  defp resolve_retry(opts) do
+    case Keyword.fetch(opts, :retry) do
+      :error -> {:ok, %TypeSafe.RetryPolicy{}}
+      {:ok, overrides} -> TypeSafe.RetryPolicy.merge(%TypeSafe.RetryPolicy{}, overrides)
     end
   end
 

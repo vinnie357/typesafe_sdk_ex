@@ -11,8 +11,9 @@ defmodule TypeSafe.HTTP do
   `base_url` and `decode_body: false`/`retry: false` are forced to the
   client's own values, and a caller-supplied `:auth` is dropped so Req's
   built-in `:auth` step can never overwrite the `authorization` header we
-  set below. `receive_timeout` is rejected earlier, at `TypeSafe.Config`
-  validation time, so it never reaches here. Used by `TypeSafe.Config.build/1`.
+  set below. `receive_timeout`, `retry_delay`, `max_retries`, and
+  `retry_log_level` are rejected earlier, at `TypeSafe.Config` validation
+  time, so they never reach here. The retry options are set per call instead. Used by `TypeSafe.Config.build/1`.
   """
   @spec new_client_req(String.t(), keyword(), String.t()) :: Req.Request.t()
   def new_client_req(base_url, req_options, api_key) do
@@ -33,7 +34,7 @@ defmodule TypeSafe.HTTP do
   @spec list_models(TypeSafe.Client.t(), keyword()) ::
           {:ok, [map()] | TypeSafe.with_response_result()} | {:error, Exception.t()}
   def list_models(%TypeSafe.Client{} = client, opts) do
-    case Keyword.validate(opts, [:headers, :with_response]) do
+    case Keyword.validate(opts, [:headers, :with_response, :retry]) do
       {:ok, opts} -> validate_and_list_models(client, opts)
       {:error, invalid_keys} -> {:error, invalid_options_error(invalid_keys)}
     end
@@ -48,19 +49,17 @@ defmodule TypeSafe.HTTP do
         opts
       )
       when is_map(questions) do
-    with {:ok, opts} <- Keyword.validate(opts, [:headers, :with_response]),
-         :ok <- validate_call_opts(opts),
+    with {:ok, opts} <- Keyword.validate(opts, [:headers, :with_response, :retry]),
+         {:ok, policy} <- validate_call_opts(client, opts),
          {:ok, built_questions} <- TypeSafe.Questions.validate(questions) do
       payload = build_payload(client, request, state, built_questions)
       headers = Keyword.get(opts, :headers, %{})
       with_response? = Keyword.get(opts, :with_response, false)
-      req = build_request(client, headers)
 
-      case Req.request(req,
+      case send_request(client, headers, policy,
              method: :post,
              url: "/v1/systemone",
-             json: payload,
-             receive_timeout: client.timeout
+             json: payload
            ) do
         {:ok, response} ->
           handle_response(response, with_response?)
@@ -94,10 +93,19 @@ defmodule TypeSafe.HTTP do
     end
   end
 
-  defp validate_call_opts(opts) do
-    case validate_with_response(opts) do
-      :ok -> validate_headers_opt(opts)
-      {:error, %TypeSafe.Error{}} = error -> error
+  defp validate_call_opts(client, opts) do
+    with :ok <- validate_with_response(opts),
+         :ok <- validate_headers_opt(opts) do
+      resolve_retry(client, opts)
+    end
+  end
+
+  # A per-call `retry:` is merged onto the client's policy field by field. An
+  # explicit `nil` is not "not given": `merge/2` rejects it.
+  defp resolve_retry(client, opts) do
+    case Keyword.fetch(opts, :retry) do
+      :error -> {:ok, client.retry}
+      {:ok, overrides} -> TypeSafe.RetryPolicy.merge(client.retry, overrides)
     end
   end
 
@@ -137,18 +145,17 @@ defmodule TypeSafe.HTTP do
   defp validate_predicate(false, message), do: {:error, %TypeSafe.Error{message: message}}
 
   defp validate_and_list_models(client, opts) do
-    case validate_call_opts(opts) do
-      :ok -> perform_list_models(client, opts)
+    case validate_call_opts(client, opts) do
+      {:ok, policy} -> perform_list_models(client, opts, policy)
       {:error, %TypeSafe.Error{}} = error -> error
     end
   end
 
-  defp perform_list_models(client, opts) do
+  defp perform_list_models(client, opts, policy) do
     headers = Keyword.get(opts, :headers, %{})
     with_response? = Keyword.get(opts, :with_response, false)
-    req = build_request(client, headers)
 
-    case Req.request(req, method: :get, url: "/v1/models", receive_timeout: client.timeout) do
+    case send_request(client, headers, policy, method: :get, url: "/v1/models") do
       {:ok, response} ->
         handle_list_models_response(response, with_response?)
 
@@ -237,13 +244,42 @@ defmodule TypeSafe.HTTP do
     %TypeSafe.Error{message: "Unknown option(s): #{Enum.join(invalid_keys, ", ")}"}
   end
 
-  defp build_request(client, call_headers) do
+  # Retries are wired per call (spec §5): `client.req` keeps `retry: false`, and
+  # the effective policy rides in `request.private` for `TypeSafe.Retry.decide/2`.
+  defp send_request(client, call_headers, policy, request_options) do
+    client
+    |> build_request(call_headers, policy)
+    |> Req.request(
+      request_options ++
+        [
+          retry: &TypeSafe.Retry.decide/2,
+          max_retries: policy.max_retries,
+          retry_log_level: false,
+          receive_timeout: client.timeout
+        ]
+    )
+  end
+
+  defp build_request(client, call_headers, policy) do
     auth = auth_header(client)
 
     client.req
     |> merge_headers(client.default_headers)
     |> merge_headers(call_headers)
     |> apply_protected_headers(auth)
+    |> Req.Request.put_private(:typesafe_retry_policy, policy)
+    |> Req.Request.append_request_steps(typesafe_retry_count: &put_retry_count/1)
+  end
+
+  # Runs on every attempt, because Req re-runs the request steps on each retry.
+  # Removing any caller-supplied value first keeps the header SDK-owned.
+  defp put_retry_count(request) do
+    request = Req.Request.delete_header(request, "x-typesafe-retry-count")
+
+    case Req.Request.get_private(request, :req_retry_count, 0) do
+      0 -> request
+      count -> Req.Request.put_header(request, "x-typesafe-retry-count", Integer.to_string(count))
+    end
   end
 
   defp auth_header(client) do
@@ -266,7 +302,6 @@ defmodule TypeSafe.HTTP do
 
   defp apply_protected_headers(req, auth) do
     req
-    |> Req.Request.delete_header("x-typesafe-retry-count")
     |> Req.Request.delete_header("content-type")
     |> put_or_delete_header("authorization", auth)
     |> Req.Request.put_header("accept", "application/json")

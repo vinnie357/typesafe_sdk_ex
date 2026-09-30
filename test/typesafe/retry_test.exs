@@ -236,4 +236,442 @@ defmodule TypeSafe.RetryTest do
       assert %TypeSafe.Error.RateLimit{retry_after_ms: ^expected} = Errors.from_response(response)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # S3b pure tests (docs/spec.md §11 S3b #10-26, 18a, 18b). No HTTP, no clock
+  # reads that change an expected value, no sleeping. `delay_ms/4` takes its
+  # randomness as a function returning a float in [0.0, 1.0]; tests pass a
+  # constant. `decide/2` reads the policy and attempt from the request the way
+  # spec §5 says (`:typesafe_retry_policy`, `:req_retry_count`).
+  # ---------------------------------------------------------------------------
+
+  alias TypeSafe.Error
+  alias TypeSafe.RetryPolicy
+
+  # Zero jitter makes `decide/2` deterministic (§11 S3b #23).
+  @zero_jitter %RetryPolicy{backoff_jitter: 0}
+
+  defp request_for(policy, retry_count \\ 0) do
+    Req.new()
+    |> Req.Request.put_private(:typesafe_retry_policy, policy)
+    |> Req.Request.put_private(:req_retry_count, retry_count)
+  end
+
+  defp response_with(status, header_pairs \\ []) do
+    Req.Response.new(status: status, headers: header_pairs, body: "")
+  end
+
+  defp merge_error_message(overrides) do
+    assert {:error, %Error{message: message}} = RetryPolicy.merge(%RetryPolicy{}, overrides)
+    message
+  end
+
+  describe "RetryPolicy.merge/2" do
+    # §11 S3b #10
+    test "merge with [] returns the same policy" do
+      policy = %RetryPolicy{max_retries: 5, backoff_jitter: 0.5}
+
+      assert RetryPolicy.merge(policy, []) == {:ok, policy}
+      assert RetryPolicy.merge(%RetryPolicy{}, []) == {:ok, %RetryPolicy{}}
+    end
+
+    # §11 S3b #11 (reliability.test.ts:195-199, 383-400)
+    test "merge is field by field" do
+      assert {:ok, merged} = RetryPolicy.merge(%RetryPolicy{}, max_retries: 7, backoff_jitter: 0)
+      assert merged == %{%RetryPolicy{} | max_retries: 7, backoff_jitter: 0}
+
+      base = %RetryPolicy{max_retries: 5, api_timeout_error: true}
+      assert {:ok, merged} = RetryPolicy.merge(base, backoff_initial_ms: 10)
+      assert merged == %{base | backoff_initial_ms: 10}
+    end
+
+    # §11 S3b #12
+    test "http_statuses accepts a list, a Range, or a MapSet, stored as a MapSet" do
+      assert {:ok, %RetryPolicy{http_statuses: from_list}} =
+               RetryPolicy.merge(%RetryPolicy{}, http_statuses: [503, 409, 503])
+
+      assert from_list == MapSet.new([409, 503])
+
+      assert {:ok, %RetryPolicy{http_statuses: from_range}} =
+               RetryPolicy.merge(%RetryPolicy{}, http_statuses: 500..502)
+
+      assert from_range == MapSet.new([500, 501, 502])
+
+      assert {:ok, %RetryPolicy{http_statuses: from_set}} =
+               RetryPolicy.merge(%RetryPolicy{}, http_statuses: MapSet.new([418]))
+
+      assert from_set == MapSet.new([418])
+
+      assert {:ok, %RetryPolicy{http_statuses: empty}} =
+               RetryPolicy.merge(%RetryPolicy{}, http_statuses: [])
+
+      assert empty == MapSet.new()
+    end
+
+    # §11 S3b #13 (reliability.test.ts:168-180, 402-421). The message form is
+    # the one §4 spells out.
+    test "validation names the field with the spec message form" do
+      assert merge_error_message(max_retries: -1) ==
+               "retry.max_retries must be a non-negative integer, got -1"
+    end
+
+    test "validation names each bad field" do
+      bad_values = [
+        max_retries: -1,
+        max_retries: 1.5,
+        max_retries: nil,
+        backoff_initial_ms: -1,
+        backoff_max_ms: -1,
+        backoff_jitter: 1.5,
+        backoff_jitter: -0.1,
+        max_retry_after_ms: -1,
+        http_statuses: [503, 42],
+        http_statuses: [99],
+        http_statuses: [1000],
+        http_statuses: [500.5],
+        http_statuses: 503,
+        respect_retry_after: "yes",
+        api_connection_error: nil,
+        api_timeout_error: 1
+      ]
+
+      for {field, value} <- bad_values do
+        message = merge_error_message([{field, value}])
+
+        assert message =~ "retry.#{field}",
+               "expected #{inspect({field, value})} to be rejected naming retry.#{field}, got: #{message}"
+      end
+    end
+
+    test "an unknown key is named" do
+      assert merge_error_message(bogus: 1) =~ "bogus"
+    end
+
+    test "a non-keyword value is rejected without raising" do
+      for bad <- [nil, :bogus, [1, 2], "max_retries: 1"] do
+        assert {:error, %Error{message: message}} = RetryPolicy.merge(%RetryPolicy{}, bad)
+        assert message =~ "retry"
+      end
+    end
+
+    # §11 S3b #14 (reliability.test.ts:411-412)
+    test "boundaries are accepted" do
+      assert {:ok, zeros} =
+               RetryPolicy.merge(%RetryPolicy{},
+                 backoff_initial_ms: 0,
+                 backoff_max_ms: 0,
+                 backoff_jitter: 0
+               )
+
+      assert {zeros.backoff_initial_ms, zeros.backoff_max_ms, zeros.backoff_jitter} == {0, 0, 0}
+
+      assert {:ok, edge} =
+               RetryPolicy.merge(%RetryPolicy{}, backoff_jitter: 1, max_retry_after_ms: 0)
+
+      assert {edge.backoff_jitter, edge.max_retry_after_ms} == {1, 0}
+
+      assert {:ok, low} = RetryPolicy.merge(%RetryPolicy{}, backoff_jitter: 0.0)
+      assert low.backoff_jitter == 0
+
+      assert {:ok, high} = RetryPolicy.merge(%RetryPolicy{}, backoff_jitter: 1.0)
+      assert high.backoff_jitter == 1
+
+      assert {:ok, %RetryPolicy{max_retries: 0}} =
+               RetryPolicy.merge(%RetryPolicy{}, max_retries: 0)
+
+      assert {:ok, %RetryPolicy{http_statuses: statuses}} =
+               RetryPolicy.merge(%RetryPolicy{}, http_statuses: [100, 999])
+
+      assert statuses == MapSet.new([100, 999])
+    end
+
+    # §5 default policy, operator decision q20: timeout retries are opt-in.
+    test "the default policy does not retry timeouts" do
+      assert %RetryPolicy{}.api_timeout_error == false
+      assert %RetryPolicy{}.api_connection_error == true
+    end
+  end
+
+  describe "delay_ms/4" do
+    # §11 S3b #15 (retry.test.ts:84-88)
+    test "exponential backoff with zero jitter" do
+      delays = for attempt <- 0..5, do: Retry.delay_ms(attempt, nil, @zero_jitter, fn -> 0.5 end)
+
+      assert delays == [500, 1000, 2000, 4000, 5000, 5000]
+      assert Enum.all?(delays, &is_integer/1)
+
+      # An empty header map behaves like no headers.
+      assert Retry.delay_ms(2, %{}, @zero_jitter, fn -> 0.5 end) == 2000
+    end
+
+    # Half-way case: 500 * 0.875 = 437.5 rounds half away from zero (JS Math.round),
+    # which distinguishes round/1 from trunc/floor.
+    test "backoff rounds half away from zero" do
+      assert Retry.delay_ms(0, nil, %RetryPolicy{}, fn -> 0.5 end) == 438
+    end
+
+    test "a huge attempt number is capped at backoff_max_ms and does not raise" do
+      assert Retry.delay_ms(2000, nil, @zero_jitter, fn -> 0.0 end) == 5000
+    end
+
+    # §11 S3b #16 (retry.test.ts:90-93)
+    test "jitter shaves at most the configured fraction" do
+      assert Retry.delay_ms(0, nil, %RetryPolicy{}, fn -> 1.0 end) == 375
+      assert Retry.delay_ms(1, nil, %RetryPolicy{}, fn -> 0.5 end) == 875
+      assert Retry.delay_ms(0, nil, %RetryPolicy{}, fn -> 0.0 end) == 500
+    end
+
+    # §11 S3b #17 (retry.test.ts:95-98): exact, with no jitter applied even at
+    # random 1.0.
+    test "Retry-After is honored exactly" do
+      assert Retry.delay_ms(0, %{"retry-after" => ["2"]}, %RetryPolicy{}, fn -> 1.0 end) == 2000
+      assert Retry.delay_ms(0, %{"retry-after-ms" => ["10"]}, %RetryPolicy{}, fn -> 1.0 end) == 10
+    end
+
+    # §11 S3b #18 (retry.test.ts:100-105)
+    test "Retry-After above max_retry_after_ms falls back to backoff" do
+      policy = %RetryPolicy{}
+
+      assert Retry.delay_ms(0, %{"retry-after" => ["61"]}, policy, fn -> 0.0 end) == 500
+      assert Retry.delay_ms(0, %{"retry-after" => ["60"]}, policy, fn -> 0.0 end) == 60_000
+      assert Retry.delay_ms(0, %{"retry-after-ms" => ["60000"]}, policy, fn -> 0.0 end) == 60_000
+      assert Retry.delay_ms(0, %{"retry-after-ms" => ["60001"]}, policy, fn -> 1.0 end) == 375
+    end
+
+    # §11 S3b #19 (retry.test.ts:107-114)
+    test "policy initial, cap, and jitter are respected" do
+      capped = %RetryPolicy{backoff_initial_ms: 100, backoff_max_ms: 350, backoff_jitter: 0}
+      delays = for attempt <- 0..3, do: Retry.delay_ms(attempt, nil, capped, fn -> 0.5 end)
+      assert delays == [100, 200, 350, 350]
+
+      assert Retry.delay_ms(0, nil, %RetryPolicy{backoff_initial_ms: 50, backoff_jitter: 0}, fn ->
+               0.5
+             end) == 50
+
+      assert Retry.delay_ms(0, nil, @zero_jitter, fn -> 1.0 end) == 500
+    end
+
+    # §11 S3b #20 (retry.test.ts:116-119)
+    test "respect_retry_after false ignores the header" do
+      policy = %RetryPolicy{respect_retry_after: false}
+
+      assert Retry.delay_ms(0, %{"retry-after-ms" => ["10"]}, policy, fn -> 0.0 end) == 500
+      assert Retry.delay_ms(0, %{"retry-after" => ["2"]}, policy, fn -> 0.0 end) == 500
+    end
+
+    # §11 S3b #21 (retry.test.ts:121-125)
+    test "max_retry_after_ms of 1000 is the ceiling, inclusive" do
+      policy = %RetryPolicy{max_retry_after_ms: 1000}
+
+      assert Retry.delay_ms(0, %{"retry-after" => ["1"]}, policy, fn -> 0.0 end) == 1000
+      assert Retry.delay_ms(0, %{"retry-after" => ["2"]}, policy, fn -> 0.0 end) == 500
+      assert Retry.delay_ms(0, %{"retry-after-ms" => ["1000"]}, policy, fn -> 0.0 end) == 1000
+      assert Retry.delay_ms(0, %{"retry-after-ms" => ["1001"]}, policy, fn -> 0.0 end) == 500
+    end
+
+    # An unparseable header carries no delay, so backoff applies.
+    test "garbage Retry-After falls back to backoff" do
+      assert Retry.delay_ms(1, %{"retry-after" => ["soon"]}, @zero_jitter, fn -> 0.0 end) == 1000
+    end
+  end
+
+  # §5 "Delay ceiling on the delay path" (lead decision 2026-09-29): the parser
+  # returns uncapped values, so the ceiling must be applied in delay_ms/4 before
+  # anything reaches Req's {:delay, _}.
+  describe "delay ceiling" do
+    @year_9999 "Fri, 31 Dec 9999 23:59:59 GMT"
+    @huge_headers [
+      %{"retry-after" => [@year_9999]},
+      %{"retry-after" => [String.duplicate("9", 309)]},
+      %{"retry-after-ms" => [String.duplicate("9", 309)]}
+    ]
+
+    # §11 S3b #18a
+    test "huge Retry-After falls back to backoff in delay_ms/4" do
+      for headers <- @huge_headers do
+        delay = Retry.delay_ms(0, headers, @zero_jitter, fn -> 0.0 end)
+
+        assert delay == 500, "expected backoff for #{inspect(headers)}, got #{delay}"
+        assert is_integer(delay)
+      end
+    end
+
+    # §11 S3b #18a, through decide/2, which is what Req actually receives.
+    test "huge Retry-After never reaches Req as a delay above the ceiling" do
+      policy = %{@zero_jitter | max_retries: 5}
+
+      for headers <- @huge_headers, retry_count <- 0..3 do
+        response = Req.Response.new(status: 429, headers: headers, body: "")
+        expected_backoff = Enum.at([500, 1000, 2000, 4000], retry_count)
+
+        assert {:delay, delay} = Retry.decide(request_for(policy, retry_count), response)
+        assert delay == expected_backoff
+        assert delay <= max(policy.max_retry_after_ms, policy.backoff_max_ms)
+      end
+    end
+
+    # §11 S3b #18b
+    test "no delay exceeds max(max_retry_after_ms, backoff_max_ms), and a header within the ceiling is exact" do
+      header_sets =
+        [
+          %{"retry-after" => ["0"]},
+          %{"retry-after" => ["1"]},
+          %{"retry-after" => ["1.5"]},
+          %{"retry-after" => ["2"]},
+          %{"retry-after" => ["61"]},
+          %{"retry-after" => ["3600"]},
+          %{"retry-after" => ["soon"]},
+          %{"retry-after" => ["Wed, 21 Oct 2015 07:28:00 GMT"]},
+          %{"retry-after-ms" => ["0"]},
+          %{"retry-after-ms" => ["150"]},
+          %{"retry-after-ms" => ["999999"]}
+        ] ++ @huge_headers
+
+      # backoff_max_ms below, equal to, and above max_retry_after_ms.
+      ceilings = [{1000, 200}, {1000, 1000}, {100, 5000}]
+
+      for {max_retry_after_ms, backoff_max_ms} <- ceilings,
+          headers <- header_sets do
+        policy = %RetryPolicy{
+          max_retry_after_ms: max_retry_after_ms,
+          backoff_max_ms: backoff_max_ms,
+          backoff_jitter: 0
+        }
+
+        parsed = Retry.parse_retry_after(headers, System.os_time(:millisecond))
+        delay = Retry.delay_ms(0, headers, policy, fn -> 0.0 end)
+
+        expected =
+          case parsed do
+            ms when is_integer(ms) and ms <= max_retry_after_ms -> ms
+            _over_or_absent -> min(500, backoff_max_ms)
+          end
+
+        assert delay == expected,
+               "policy #{inspect({max_retry_after_ms, backoff_max_ms})}, headers " <>
+                 "#{inspect(headers)}: expected #{expected}, got #{delay}"
+
+        assert delay <= max(max_retry_after_ms, backoff_max_ms)
+      end
+    end
+  end
+
+  describe "decide/2" do
+    # §11 S3b #22
+    test "a 2xx response is never retried" do
+      for status <- [200, 201, 204] do
+        assert Retry.decide(request_for(@zero_jitter), response_with(status)) == false
+      end
+    end
+
+    # JS checks res.ok before the status set (client.ts:389-397), so a set that
+    # lists 200 still never retries a success.
+    test "a 2xx response is not retried even when http_statuses lists it" do
+      policy = %{@zero_jitter | http_statuses: MapSet.new([200])}
+
+      assert Retry.decide(request_for(policy), response_with(200)) == false
+    end
+
+    # §11 S3b #23 (retry.test.ts:38-44)
+    test "default statuses retry with the attempt-0 backoff, others do not" do
+      for status <- [408, 429, 500, 502, 503, 504, 529, 599] do
+        assert Retry.decide(request_for(@zero_jitter), response_with(status)) == {:delay, 500},
+               "status #{status} should retry"
+      end
+
+      for status <- [400, 401, 403, 404, 409, 422, 600] do
+        assert Retry.decide(request_for(@zero_jitter), response_with(status)) == false,
+               "status #{status} should not retry"
+      end
+    end
+
+    test "the delay follows the attempt counted by :req_retry_count" do
+      policy = %{@zero_jitter | max_retries: 5}
+
+      delays =
+        for count <- 0..4 do
+          {:delay, delay} = Retry.decide(request_for(policy, count), response_with(503))
+          delay
+        end
+
+      assert delays == [500, 1000, 2000, 4000, 5000]
+    end
+
+    # §11 S3b #24 (retry.test.ts:46-51)
+    test "custom and empty status sets" do
+      only_409 = %{@zero_jitter | http_statuses: MapSet.new([409])}
+      assert Retry.decide(request_for(only_409), response_with(409)) == {:delay, 500}
+      assert Retry.decide(request_for(only_409), response_with(503)) == false
+
+      none = %{@zero_jitter | http_statuses: MapSet.new()}
+      assert Retry.decide(request_for(none), response_with(503)) == false
+    end
+
+    # §11 S3b #25
+    test "a 429 with Retry-After 2 delays exactly 2000ms; a 400 does not retry" do
+      request = request_for(%RetryPolicy{})
+
+      assert Retry.decide(request, response_with(429, [{"retry-after", "2"}])) == {:delay, 2000}
+      assert Retry.decide(request, response_with(400, [{"retry-after", "2"}])) == false
+    end
+
+    # §11 S3b #26, transport errors (client.ts:150-154, 383-384); q20.
+    test "a :timeout is not retried by default and is retried with api_timeout_error: true" do
+      timeout = %Req.TransportError{reason: :timeout}
+
+      assert Retry.decide(request_for(%{%RetryPolicy{} | backoff_jitter: 0}), timeout) == false
+
+      opted_in = %{@zero_jitter | api_timeout_error: true}
+      assert Retry.decide(request_for(opted_in), timeout) == {:delay, 500}
+    end
+
+    test ":closed and other exceptions follow api_connection_error" do
+      closed = %Req.TransportError{reason: :closed}
+      refused = %Req.TransportError{reason: :econnrefused}
+      other = RuntimeError.exception("boom")
+
+      for exception <- [closed, refused, other] do
+        assert Retry.decide(request_for(@zero_jitter), exception) == {:delay, 500}
+
+        assert Retry.decide(
+                 request_for(%{@zero_jitter | api_connection_error: false}),
+                 exception
+               ) == false
+      end
+
+      # api_connection_error does not govern timeouts, nor api_timeout_error the rest.
+      assert Retry.decide(
+               request_for(%{
+                 @zero_jitter
+                 | api_timeout_error: true,
+                   api_connection_error: false
+               }),
+               %Req.TransportError{reason: :timeout}
+             ) == {:delay, 500}
+
+      assert Retry.decide(
+               request_for(%{@zero_jitter | api_timeout_error: true}),
+               closed
+             ) == {:delay, 500}
+    end
+
+    test "transport errors use backoff and honor the attempt number" do
+      policy = %{@zero_jitter | max_retries: 3}
+
+      assert Retry.decide(request_for(policy, 2), %Req.TransportError{reason: :closed}) ==
+               {:delay, 2000}
+    end
+
+    test "retries are exhausted once :req_retry_count reaches max_retries" do
+      policy = %{@zero_jitter | max_retries: 2}
+
+      assert Retry.decide(request_for(policy, 1), response_with(503)) == {:delay, 1000}
+      assert Retry.decide(request_for(policy, 2), response_with(503)) == false
+      assert Retry.decide(request_for(policy, 3), response_with(503)) == false
+
+      assert Retry.decide(request_for(policy, 2), %Req.TransportError{reason: :closed}) == false
+
+      assert Retry.decide(request_for(%{policy | max_retries: 0}), response_with(503)) == false
+    end
+  end
 end
