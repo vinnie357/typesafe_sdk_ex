@@ -4,6 +4,6 @@ defmodule TypeSafeTest do
   doctest TypeSafe
 
   test "version/0 returns the mix project version string" do
-    assert TypeSafe.version() == "0.2.0"
+    assert TypeSafe.version() == "0.3.0"
   end
 end

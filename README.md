@@ -282,6 +282,10 @@ or `TYPESAFE_LOG_LEVEL`, per client:
 - `:debug` adds the request line, with the URL, the headers, and the body sent,
   and the response body.
 
+The `#N` in each line is a request number, shared by the attempts and retries of
+one call. It counts across the whole VM, not per client, so it does not restart
+at `#1` for each client.
+
 Your application's `Logger` level has to allow `:info` or `:debug` too, or
 `Logger` drops the lines. An unrecognized `TYPESAFE_LOG_LEVEL` falls back to
 `:warning` without an error.
@@ -322,6 +326,10 @@ keep handlers total. The call that fired it still returns its normal result.
 
 ## Known limitations
 
+- **No call-level span and no model, token, or question-id metadata.** The events
+  cover each HTTP attempt and each retry. No event covers a whole call, and the
+  metadata carries no `model`, usage tokens, or question ids
+  ([#13](https://github.com/vinnie357/typesafe_sdk_ex/issues/13)).
 - **No supervised client and no shared rate-limit cooldown.** `TypeSafe.new/1`
   returns a plain struct, and the SDK starts no process of its own. Each client
   backs off on its own
@@ -335,7 +343,7 @@ different project. Install it as a git dependency, pinned to a release tag:
 ```elixir
 def deps do
   [
-    {:typesafe_sdk_ex, github: "vinnie357/typesafe_sdk_ex", tag: "v0.2.0"}
+    {:typesafe_sdk_ex, github: "vinnie357/typesafe_sdk_ex", tag: "v0.3.0"}
   ]
 end
 ```
