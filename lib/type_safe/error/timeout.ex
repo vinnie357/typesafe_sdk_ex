@@ -1,6 +1,6 @@
 defmodule TypeSafe.Error.Timeout do
   @moduledoc """
-  A request attempt waited longer than the timeout for a response. A kind of
+  A request attempt hit the timeout while connecting or waiting for a response. A kind of
   transport failure, kept as its own struct rather than a
   `TypeSafe.Error.Connection` subtype because Elixir has no inheritance.
 
