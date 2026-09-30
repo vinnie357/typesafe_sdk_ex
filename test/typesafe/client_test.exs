@@ -14,7 +14,7 @@ defmodule TypeSafe.ClientTest do
     respect_retry_after: true,
     max_retry_after_ms: 60_000,
     api_connection_error: true,
-    api_timeout_error: true
+    api_timeout_error: false
   }
 
   # docs/spec.md §11 S1 #1 (client.test.ts:100-103)
