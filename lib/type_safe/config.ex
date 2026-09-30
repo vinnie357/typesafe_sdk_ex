@@ -379,7 +379,9 @@ defmodule TypeSafe.Config do
 
   def validate_timeout(value) do
     {:error,
-     %TypeSafe.Error{message: "timeout must be a positive integer, got #{inspect(value)}"}}
+     %TypeSafe.Error{
+       message: "timeout must be a positive integer, got #{inspect(value, charlists: :as_lists)}"
+     }}
   end
 
   defp validate_log_level_value(opts) do

@@ -13,7 +13,7 @@ Req has no attempt-level timer. Its `receive_timeout` bounds each socket read (`
 
 1. `timeout:` is a positive integer number of milliseconds at `new/1` and per call on `system_one/3` and `list_models/2`. The default is `10_000` (`retry.ts:5`).
 2. The largest accepted value is `4_294_967_295` (2^32 - 1, about 49.7 days). `:gen_tcp.recv/3` encodes its timeout in 32 bits, and a larger value would wrap. A larger integer returns `"timeout must be at most 4294967295 ms, got <n>"`.
-3. `new/1` and the per-call option reject floats, `nil`, and non-numbers with `"timeout must be a positive integer, got <inspect(value)>"`. The SDK does this before it sends a request.
+3. `new/1` and the per-call option reject floats, `nil`, and non-numbers with `"timeout must be a positive integer, got <inspect(value, charlists: :as_lists)>"`. The SDK does this before it sends a request.
 4. A per-call `timeout: nil` is rejected, not read as "not given". `timeout` has no environment fallback.
 5. The effective value is the per-call `timeout:`, else the client's, else `10_000`. A per-call value never changes `client.timeout`.
 6. The effective value maps to Req's `receive_timeout` on every attempt. Each retry gets a fresh timeout. There is no total budget, which follows JS.

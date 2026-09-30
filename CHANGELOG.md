@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `:telemetry` is a direct dependency (`~> 1.0`), at the same locked 1.4.2 that
   Req already brought in.
 
+### Fixed
+
+- Validation error messages render an integer list as a list. A rejected
+  `retry: [http_statuses: [99]]` now reports `got [99]`, not `got ~c"c"`, and
+  the `retry` and `timeout:` messages do the same for any value they show.
+
 ## [0.2.0] - 2026-09-30
 
 ### Added

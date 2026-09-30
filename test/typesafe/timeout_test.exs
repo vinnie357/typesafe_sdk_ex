@@ -609,4 +609,67 @@ defmodule TypeSafe.TimeoutTest do
       end
     end
   end
+
+  # #20: a rejected value renders with `charlists: :as_lists`, so an integer
+  # list reads as integers, not as a charlist sigil (`[99]` is `~c"c"`).
+  describe "error messages render integer lists as lists (#20)" do
+    @statuses_expected "a list, Range, or MapSet of integers from 100 to 999"
+
+    test "retry: [http_statuses: [99]] is rejected with got [99]" do
+      expected = "retry.http_statuses must be #{@statuses_expected}, got [99]"
+
+      assert {:error, %Error{message: ^expected}} = new_client(retry: [http_statuses: [99]])
+
+      for function <- @functions do
+        {:ok, client} = stub_client(StubAdapter.respond(200, @ok_body), [])
+
+        assert {:error, %Error{message: ^expected}} =
+                 call(function, client, retry: [http_statuses: [99]])
+
+        assert drain_sent() == []
+      end
+    end
+
+    test "a charlist-looking invalid list renders as integers" do
+      # 104 and 105 are valid statuses; 33 makes the list invalid while every
+      # element is ASCII-printable, so plain inspect/1 renders it as ~c"hi!".
+      expected = "retry.http_statuses must be #{@statuses_expected}, got [104, 105, 33]"
+
+      assert {:error, %Error{message: ^expected}} =
+               new_client(retry: [http_statuses: [104, 105, 33]])
+    end
+
+    test "retry: [99] is rejected as a non-keyword list with got [99]" do
+      expected = "retry must be a keyword list, got [99]"
+
+      assert {:error, %Error{message: ^expected}} = new_client(retry: [99])
+
+      for function <- @functions do
+        {:ok, client} = stub_client(StubAdapter.respond(200, @ok_body), [])
+        assert {:error, %Error{message: ^expected}} = call(function, client, retry: [99])
+        assert drain_sent() == []
+      end
+    end
+
+    test "timeout: [99] is rejected with got [99]" do
+      expected = "timeout must be a positive integer, got [99]"
+
+      assert {:error, %Error{message: ^expected}} = new_client(timeout: [99])
+
+      for function <- @functions do
+        {:ok, client} = stub_client(StubAdapter.respond(200, @ok_body), [])
+        assert {:error, %Error{message: ^expected}} = call(function, client, timeout: [99])
+        assert drain_sent() == []
+      end
+    end
+
+    # Controls: green on 9b9a5d4, they guard against over-fixing the rendering.
+    test "control: a non-list value still renders as before" do
+      assert {:error, %Error{message: "retry.max_retries must be a non-negative integer, got -1"}} =
+               new_client(retry: [max_retries: -1])
+
+      assert {:error, %Error{message: ~s(timeout must be a positive integer, got "x")}} =
+               new_client(timeout: "x")
+    end
+  end
 end
