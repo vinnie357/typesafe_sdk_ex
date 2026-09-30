@@ -142,7 +142,7 @@ Per-call validation errors (bad `timeout` or `retry`) come back before any reque
 | `api_connection_error` | true | boolean |
 | `api_timeout_error` | **false** (JS: true, `retry.ts:22`) | boolean. **Deliberate deviation from JS (operator decision 2026-09-29, §12 q20):** timeout retries are opt-in, for every call, not only POST. A timed-out `POST /v1/systemone` may already have run and billed, and the API has no idempotency key (`client.ts:321-400`, `api.md:L338`). |
 
-Every other default matches JS, so 408, 429, 5xx, and connection errors still retry by default. Delays are non-negative integers, so `delay_ms` and `parse_retry_after` apply `round/1`: JS returns fractional milliseconds, but Req accepts only an integer `{:delay, _}` (`req@0.7.4 lib/req/steps.ex:1803`).
+Every other default matches JS, so 408, 429, 5xx, and connection errors still retry by default. Delays are non-negative integers: JS returns fractional milliseconds, but Req accepts only an integer `{:delay, _}` (`req@0.7.4 lib/req/steps.ex:1803`). `delay_ms` rounds with `round/1` (half away from zero) and `parse_retry_after` rounds half up in exact integer arithmetic; the two are identical for non-negative values.
 
 **Retry decision** (`client.ts:364-400`), where attempt `n` counts from 0 and `retries_left = max_retries - n`:
 - Transport error: retry when `retries_left > 0` and the error is a `Timeout` with `api_timeout_error` set, or a `Connection` with `api_connection_error` set (`client.ts:150-154,383-384`). A timeout is checked before a connection error. In `decide/2`, a `Req.TransportError{reason: :timeout}` follows `api_timeout_error` and any other exception follows `api_connection_error`. With the Elixir default (`api_timeout_error: false`) a timeout returns the error at once.
@@ -154,12 +154,14 @@ Every other default matches JS, so 408, 429, 5xx, and connection errors still re
 2. Otherwise the delay is `round(min(backoff_initial_ms * 2^attempt, backoff_max_ms) * (1 - random() * backoff_jitter))` with `random ∈ [0,1)`. Defaults with no jitter give 500, 1000, 2000, 4000, 5000, 5000 (`retry.test.ts:84-88`). Maximum jitter gives 375 at attempt 0 (`retry.test.ts:90-93`).
 3. Transport errors have no headers, so they always use backoff (`client.ts:385`).
 
+**Delay ceiling on the delay path (lead decision 2026-09-29).** `TypeSafe.Retry.parse_retry_after/2` deliberately returns uncapped values (S3a): a year-9999 HTTP date parses to about 2.5e14 ms, and 309 digits parse to an exact 309-digit integer. The ceiling is applied one step later. `delay_ms/4`, and `decide/2` through it, compare the parsed value with `max_retry_after_ms` and fall back to backoff when it is larger (`retry.ts:56-68`, step 1 above), so no parsed Retry-After above the ceiling ever reaches Req's `{:delay, _}`. Backoff is capped by `backoff_max_ms`, so **no value handed to Req can exceed `max(max_retry_after_ms, backoff_max_ms)`**. Pure tests pin this with a year-9999 date and 309 nines (§11 S3b #18).
+
 **Retry-After parsing** (`retry.ts:38-49`):
 - `retry-after-ms` wins when present and it is a finite number `>= 0`.
 - Otherwise `retry-after`: a number `>= 0` means seconds × 1000 (`"1.5"` → 1500). A negative number → nil. An HTTP date → `max(0, date - now)`. Garbage → nil (`retry.test.ts:54-77`).
 - The result is an integer: round fractional milliseconds (`"1.5"` → 1500, `retry-after-ms: "10.4"` → 10).
 - Accept only values matching `^\d+(\.\d+)?$` after trimming whitespace. `""`, `"   "`, `".5"`, `"5."`, `"+5"`, `"1e3"`, and `"0x10"` are nil. This deliberately deviates from JS `Number()`, which accepts all of these (`retry.ts:39,44`; §12 q15 resolved). A blank `retry-after-ms` is invalid, so it falls through to `retry-after`.
-- Rounding is `Kernel.round/1` (half away from zero): `retry-after-ms: "2.5"` → 3.
+- Rounding is half up in exact integer arithmetic, which equals half away from zero for the non-negative values the grammar admits (`TypeSafe.Retry` `decimal_to_ms/2`): `retry-after-ms: "2.5"` → 3. The parser does not use `Kernel.round/1`, because a float cannot represent oversize digit strings.
 - An HTTP date is whatever `:httpd_util.convert_request_date/1` accepts (RFC 1123, RFC 850, asctime: the forms RFC 9110 §5.6.7 permits). Anything else is nil.
 - When a header carries several values, the first one is used. This deviates from JS: `Headers.get` comma-joins the values, so `"2, 9"` gives `Number` NaN, then `Date.parse` NaN, then `undefined`.
 - Take `now` as a parameter so tests stay pure.
@@ -377,6 +379,11 @@ AC:
 - (3) An invalid value (0, negative, float, `nil`, non-number) is rejected at both levels before any request.
 - (4) The existing N2 and R2 tests (`client_test.exs:522-524,712-736`) stay green.
 
+**README accuracy is a release gate for v0.2.0 (operator decision 2026-09-29).**
+- Every S3 sub-slice PR updates `README.md` for what it ships. S3b adds a Retries section: the defaults, opt-in timeout retries (`retry: [api_timeout_error: true]`), the POST double-billing note (§5, q20), per-call overrides, and the `X-TypeSafe-Retry-Count` header. S3c replaces the "Fixed timeout" limitation with the `timeout:` option.
+- The v0.2.0 release PR (after S3c) does a full README audit against the code. Every claim is verified, the install snippet is pinned `tag: "v0.2.0"`, and the README carries the consumer dependency note: Mint >= 1.10.2 with any Finch, or Mint 1.11.x with Finch >= 0.24.0, and `mix deps.update mint finch` to pick them up.
+- Gate 4 for that PR verifies each README claim by running it.
+
 **S4: question helpers and pre-send validation.** Depends on S1; it can run in parallel with S2 and S3. §8 builders, wire preservation of nil, lists, and omitted keys, and validation with zero requests.
 AC: every §8 row and validation message is asserted, and the stub adapter receives 0 calls on validation failure (`refute_received {:sent, _}`).
 
@@ -464,7 +471,7 @@ Retry-After tests send `retry-after-ms: 0`, so every delay is 0 and `Process.sle
 4. `invalid ms falls through`: ms "nope" and ms "-1", each with retry-after "3" → 3000 (new; `retry.ts:39-45`)
 5. `HTTP date against an injected now`: +5s → 5000, past → 0 (`retry.test.ts:65-69`); RFC 850 and asctime forms too
 6. `garbage and negative → nil`: "soon", "-5", and ms "nope" alone (`retry.test.ts:71-76`); blank "" and "   " → nil for both headers, and a blank ms falls through to retry-after
-7. `fractional ms rounded`: ms "10.4" → 10, ms "2.5" → 3 (`Kernel.round/1`), and `is_integer/1` (new; `steps.ex:1803`)
+7. `fractional ms rounded`: ms "10.4" → 10, ms "2.5" → 3 (half up), and `is_integer/1` (new; `steps.ex:1803`)
 8. `non-decimal forms rejected`: "0x10", "1e3", ".5", "5.", "+5" → nil (new; §12 q15)
 9. `TypeSafe.Errors.from_response/1` on a 429: ms "1500" → `retry_after_ms` 1500, and retry-after "1.5" → 1500 (`errors.ts:94`; pure)
 
@@ -478,6 +485,8 @@ Retry-After tests send `retry-after-ms: 0`, so every delay is 0 and `Process.sle
 16. `jitter shaves at most the fraction`: attempt 0 with maximum jitter → 375, attempt 1 with random 0.5 → 875 (`retry.test.ts:90-93`)
 17. `Retry-After honored exactly`: 2000; ms 10 → 10 (`retry.test.ts:95-98`)
 18. `ceiling`: 61s → 500, 60s → 60000, ms 60000 → 60000, ms 60001 with max jitter → 375 (`retry.test.ts:100-105`)
+    - 18a. `huge Retry-After never exceeds the ceiling` (new; §5 "Delay ceiling"): a year-9999 HTTP date, 309 nines in `retry-after`, and 309 nines in `retry-after-ms` each fall back to backoff in `delay_ms/4` and through `decide/2`, which returns `{:delay, ms}` with `ms == backoff` (zero jitter) and `ms <= max(max_retry_after_ms, backoff_max_ms)`.
+    - 18b. `ceiling invariant over policies` (new): for a spread of header values and for policies whose `backoff_max_ms` is below, equal to, and above `max_retry_after_ms`, the result never exceeds `max(max_retry_after_ms, backoff_max_ms)`, and a header at or below `max_retry_after_ms` is used exactly.
 19. `policy initial, cap, and jitter respected`: 100, 200, 350, 350; 50; jitter 0 → 500 (`retry.test.ts:107-114`)
 20. `respect_retry_after false ignores the header` (`retry.test.ts:116-119`)
 21. `max_retry_after_ms ceiling of 1000` (`retry.test.ts:121-125`)
@@ -519,6 +528,8 @@ Retry-After tests send `retry-after-ms: 0`, so every delay is 0 and `Process.sle
 49. `Timeout reports the effective value`: per-call 50 with `max_retries: 0` → `%Timeout{timeout_ms: 50, message: "Request timed out after 50ms."}` (`reliability.test.ts:445-458`)
 50. `same per-attempt timeout on retry`: with `api_timeout_error: true` and zero backoff, `:timeout` then 200 → both `receive_timeout` values equal t (`reliability.test.ts:476-491`)
 51. `invalid timeout (0, -5, 1.5, nil, "x") at new/1 and per call`, 0 requests (`reliability.test.ts:524-534`)
+
+52. `timeout then reuse on a real socket`: a local `:gen_tcp` server delays its first response past the client `timeout:`, then a second call on the same client must return `{:ok, _}` or a clean `{:error, %TypeSafe.Error.*{}}` and never raise. Only S3c can write it, because the `timeout:` option is what keeps it fast (a 10s default timeout would make it slow). Reference: PR #3 review comment https://github.com/vinnie357/typesafe_sdk_ex/pull/3#issuecomment-5900903615. This is the one S3c test with a real socket, so it binds a per-test high port and closes the listener in `on_exit`.
 
 The S3c tests that could hit a timeout set `max_retries: 0` from the start.
 
@@ -577,12 +588,18 @@ The S3c tests that could hit a timeout set `max_retries: 0` from the start.
 
 13. **Timeout semantics. RESOLVED (S3 plan, 2026-09-29).** JS bounds headers plus the full body per attempt (`client.ts:403-447`). Req `receive_timeout` is a socket-receive timeout (`req@0.7.4 lib/req.ex:445`), so a server that trickles its body can exceed the total. Accepted: the port keeps per-receive `receive_timeout` semantics and documents the trickle case; no `Task.await`-bounded attempt. The connect timeout is Req/Finch's default (unverified).
 14. **`User-Agent` / `X-TypeSafe-SDK` / `X-TypeSafe-Runtime` values** for the Elixir SDK. Options are `typesafe-sdk/<ex-version>` or `typesafe-sdk-ex/<version>`, and `elixir/<System.version()> (otp/<release>)`. Whether the server parses these is unknown.
-15. **Retry-After number parsing. RESOLVED (S3 plan, 2026-09-29).** JS `Number()` accepts `"0x10"`, `"1e3"`, and whitespace (`retry.ts:44`). The port supports only `^\d+(\.\d+)?$` after trimming (§5). Lead decisions (S3a test-author round): (1) a blank or whitespace-only value is nil, not 0, because JS `Number("")` = 0 would mean an immediate retry against a rate-limiting server; a deliberate deviation from JS. (2) The decimal grammar is strict, so `".5"`, `"5."`, `"+5"`, `"1e3"`, `"0x10"` are nil; a deliberate deviation from JS. (3) Rounding is `Kernel.round/1`. (4) HTTP dates are whatever `:httpd_util.convert_request_date/1` accepts (RFC 1123, RFC 850, asctime), else nil. (5) Multiple values for one header: the first is used.
+15. **Retry-After number parsing. RESOLVED (S3 plan, 2026-09-29).** JS `Number()` accepts `"0x10"`, `"1e3"`, and whitespace (`retry.ts:44`). The port supports only `^\d+(\.\d+)?$` after trimming (§5). Lead decisions (S3a test-author round): (1) a blank or whitespace-only value is nil, not 0, because JS `Number("")` = 0 would mean an immediate retry against a rate-limiting server; a deliberate deviation from JS. (2) The decimal grammar is strict, so `".5"`, `"5."`, `"+5"`, `"1e3"`, `"0x10"` are nil; a deliberate deviation from JS. (3) Rounding is half up in exact integer arithmetic (identical to `Kernel.round/1` for non-negatives). (4) HTTP dates are whatever `:httpd_util.convert_request_date/1` accepts (RFC 1123, RFC 850, asctime), else nil. (5) Multiple values for one header: the first is used.
 16. **Explicit empty `api_key: ""`. RESOLVED — operator decision (Gate 4 review N7).** JS accepts it, because `??` falls back only on null/undefined (`env.ts:22-23`), and then sends `Bearer `. The Elixir port does NOT mirror that: an explicit blank or whitespace-only `api_key` option (`""`, `"   "`) is rejected with the same `{:error, %TypeSafe.Error{message: m}}` (`m =~ "TYPESAFE_API_KEY"`) as a blank environment value — an explicit blank is treated identically to "not given," not as "given but empty."
 17. **Raw-body error message.** JS re-stringifies the parsed body (`errors.ts:64`); Elixir uses the original text (§6). The two differ only when the server sends non-compact JSON. Is that acceptable?
 18. **`:inets` in releases. RESOLVED (S3 plan, 2026-09-29).** `:httpd_util` works in `mix`/`elixir` without starting inets (verified), and a release needs `:inets` in `extra_applications` to bundle it, so S3a adds it. Compilation in test env cannot detect its absence (credo loads `:inets`); the app-spec test does (§5). Log capture goes through the `logger:` option (§7, verified), and the HTTP-date parser is `:httpd_util` (§5, verified).
 19. **Request-tag numbering.** JS `#1` is per client. Elixir uses a VM-wide monotonic integer. Is that acceptable?
 20. **POST double-billing. RESOLVED — operator decision 2026-09-29: timeout retries are opt-in.** JS retries `POST /v1/systemone` on 5xx, 408, 429, connection errors, and timeouts, with no idempotency key (`client.ts:321-400`; `api.md:L338`). The port keeps JS parity for statuses and connection errors, but `RetryPolicy.api_timeout_error` defaults to `false` (JS: `true`, `retry.ts:22`) for every call, so a timed-out request that may already have billed is not resent. Callers opt in with `retry: [api_timeout_error: true]`. Connection errors dropped mid-response remain a smaller double-billing risk under parity; opt out with `retry: [api_connection_error: false]`. No idempotency key is invented (§5).
+21. **Response-header size bound. RESOLVED — no SDK cap needed (Gate 4 N-a, 2026-09-29).** A hostile 1M-digit `retry-after` value costs about 180 ms of parse CPU in `TypeSafe.Retry.parse_retry_after/2` (measured once, 2026-09-29, Elixir 1.19.5; 262,000 digits took 21 ms). Mint bounds the response header section before the parser can see it, so the input cannot reach that size over the network:
+    - Mint 1.11.0 (`mix.lock`) HTTP/1 defaults `:max_header_list_size` to 256 KiB (`deps/mint/lib/mint/http1.ex:33`), documented as covering the status line, chunk-size lines, header section, and trailers (`http1.ex:167-170`), and enforced with `{:max_header_list_size_exceeded, size, max_size}` (`http1.ex:1081-1088`).
+    - HTTP/2 has the same 256 KiB default (`deps/mint/lib/mint/http2.ex:163,1224`).
+    - Finch 0.24.0 does not override the option (no `max_header_list_size` match in `deps/finch/lib`), so Req users get Mint's default. That error surfaces as a transport error and maps to `TypeSafe.Error.Connection`.
+    - The worst case that reaches the parser is therefore a single header of just under 256 KiB, about 21 ms.
+    - The bound depends on Mint >= 1.9.2, when the option arrived (`http1.ex:170`); the dependency note in §10 already requires Mint >= 1.10.2. The v0.2.0 README audit re-checks the citation against the locked Mint. No SDK cap is added.
 
 ## 13. Integration test plan (deferred)
 
