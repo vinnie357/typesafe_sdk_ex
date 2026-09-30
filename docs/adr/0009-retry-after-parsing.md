@@ -1,7 +1,7 @@
 # ADR 0009: Retry-After parsing
 
 **Status:** Accepted
-**Date:** 2026-09-29
+**Date:** 2026-09-29; amended 2026-09-30 (citation re-check)
 
 ## Context
 
@@ -35,7 +35,7 @@ Req cannot supply the parser. Its own handler reads `retry-after` only and cover
 
 - Decisions 5, 6, and 8 deviate from JS. JS accepts `"0x10"`, `"1e3"`, and whitespace, treats a blank value as 0, returns fractional milliseconds, and comma-joins several header values, so `"2, 9"` gives NaN and then `undefined` (`retry.ts:39,44,46`). The port returns `nil` for those three forms and for a blank value, rounds to an integer, and returns 2000 for the two separate values `["2", "9"]`.
 - The grammar is unbounded. A hostile 1,000,000-digit value cost about 181 ms of parse time in an observation on 2026-09-29 (Elixir 1.19.5), and 262,000 digits cost about 21 ms. The fraction path costs more: `"1."` followed by 262,000 nines took 32 to 33 ms, under `retry-after-ms` and under `retry-after` (three runs each, same machine and date; 262,000 nines alone took 21 to 24 ms). The 256 KiB Mint limit caps the header section just under 262,144 bytes, so the worst input that reaches the parser costs about 33 ms.
-- The cap depends on Mint 1.9.2 or later, when `:max_header_list_size` arrived (`deps/mint/lib/mint/http1.ex:170`). Finch 0.24.0 does not override the option. The v0.2.0 README audit re-checks the citations against the locked Mint (issue #8).
+- The cap depends on Mint 1.9.2 or later, when `:max_header_list_size` arrived (`deps/mint/lib/mint/http1.ex:170`). Finch 0.24.0 does not override the option. The v0.2.0 README audit re-checked the citations in this ADR against the locked Mint 1.11.0 on 2026-09-30 (issue #8), and every file and line matched.
 - The parser depends on `:inets` being bundled (ADR 0002) and rescues one exception from a function that raises rather than returning an error tuple. Replace it with a hand-written date parser if `:inets` is ever dropped.
 - A timezone token is dropped, so `"... PST"` and `"... +0500"` read as UTC. Servers send GMT (RFC 9110).
 
@@ -56,4 +56,4 @@ Req cannot supply the parser. Its own handler reads `retry-after` only and cover
 - PR #1 review round 3, finding D2 (the pre-split parser read integer seconds only): https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5722393470
 - PR #4 review round 1, findings B1, N1, N2, N3: https://github.com/vinnie357/typesafe_sdk_ex/pull/4#issuecomment-5901344671
 - PR #4 review round 2, findings N-a, N-b, and the carried finding: https://github.com/vinnie357/typesafe_sdk_ex/pull/4#issuecomment-5901419967
-- The README audit that re-checks the Mint citation: https://github.com/vinnie357/typesafe_sdk_ex/issues/8
+- The v0.2.0 README audit that re-checked the Mint citation: https://github.com/vinnie357/typesafe_sdk_ex/issues/8

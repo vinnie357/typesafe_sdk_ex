@@ -1,7 +1,7 @@
 # ADR 0002: Runtime dependency is Req only
 
 **Status:** Accepted
-**Date:** 2026-09-17; amended 2026-09-29 (`:inets`, Mint and Finch)
+**Date:** 2026-09-17; amended 2026-09-29 (`:inets`, Mint and Finch); amended 2026-09-30 (README consumer note)
 
 ## Context
 
@@ -16,7 +16,7 @@ Several JS features tempt a dependency (see the table under Decision). Each has 
 3. The SDK uses the substitutes in the table below.
 4. `:inets` is listed in `extra_applications`, so a release bundles `:httpd_util`.
 5. `mix.exs` declares no `mint` or `finch` constraint.
-6. The CHANGELOG records the safe Mint and Finch combinations for consumers: Mint 1.10.x at 1.10.2 or later with any Finch, or Mint 1.11.x with Finch 0.24.0 or later. Mint 1.11.x with Finch 0.23.x is not safe: it can raise on the request after a receive timeout. Consumers run `mix deps.update mint finch`. `CHANGELOG.md` states this pairing; the README carries no note yet (issue #8).
+6. The CHANGELOG records the safe Mint and Finch combinations for consumers: Mint 1.10.x at 1.10.2 or later with any Finch, or Mint 1.11.x with Finch 0.24.0 or later. Mint 1.11.x with Finch 0.23.x is not safe: it can raise on the request after a receive timeout. Consumers run `mix deps.update mint finch`. `CHANGELOG.md` and the README installation section state this pairing.
 7. Docs stay as `@moduledoc` and `@doc`. The SDK adds no `ex_doc` dependency.
 
 | Concern | Mechanism |
@@ -66,4 +66,4 @@ Several JS features tempt a dependency (see the table under Decision). Each has 
 - Runtime dependency constraint, Mint and Finch decision, consumer note: PR #3 review, findings 1 and 4, https://github.com/vinnie357/typesafe_sdk_ex/pull/3#issuecomment-5900903615 and re-attestation https://github.com/vinnie357/typesafe_sdk_ex/pull/3#issuecomment-5901000229
 - `:inets` is started in consumers (N1): https://github.com/vinnie357/typesafe_sdk_ex/pull/4#issuecomment-5901344671
 - `CHANGELOG.md`, section `[0.1.1]`: safe combinations.
-- The README audit that must repeat the consumer note before v0.2.0: https://github.com/vinnie357/typesafe_sdk_ex/issues/8
+- The v0.2.0 README audit that added the consumer note to the README: https://github.com/vinnie357/typesafe_sdk_ex/issues/8

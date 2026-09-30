@@ -44,7 +44,7 @@ defmodule TypeSafe do
   ## Examples
 
       iex> TypeSafe.version()
-      "0.1.1"
+      "0.2.0"
 
   """
   @spec version() :: String.t()
@@ -218,7 +218,8 @@ defmodule TypeSafe do
   extra key) returns
   `{:error, %TypeSafe.Error{message: "system_one/3 request cannot be encoded as JSON"}}`
   and sends nothing. The message never includes the content. Malformed Elixir data
-  such as an improper list still raises: decoded JSON cannot produce it.
+  still raises, because decoded JSON cannot produce it: an improper list, a
+  charlist map key with an invalid code point, and an improper-list map key.
 
   Retryable failures are retried per the client's retry policy, and each retry sends the same
   request body. A timeout is not retried by default: a timed-out request may already have been

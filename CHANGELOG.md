@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-30
+
 ### Added
 
 - Retries: requests failing with 408, 429, 5xx, or a connection error are
@@ -50,8 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TypeSafe.system_one/3` returns `{:error, %TypeSafe.Error{message:
   "system_one/3 request cannot be encoded as JSON"}}`, and sends nothing, when
   the request holds a PID, a tuple, a struct without an encoder, a tuple map
-  key, or invalid UTF-8, instead of raising. An improper list still raises. The message never
-  includes the content.
+  key, or invalid UTF-8, instead of raising. Malformed Elixir data still raises:
+  an improper list (`FunctionClauseError`), a charlist map key holding an
+  invalid code point (`UnicodeConversionError`), and an improper-list map key
+  (`ArgumentError`). The message never includes the content.
 - `TypeSafe.new/1` trims U+FEFF (the byte order mark) like whitespace, for
   `api_key` and every environment value, as JS `trim` does. A BOM-only value is
   blank, and a BOM around a key is no longer sent in the `authorization` header.
@@ -137,12 +141,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Update transitive dependencies Mint to 1.11.0 (fixes CVE-2026-91043,
-  CVE-2026-92103, CVE-2026-94194, CVE-2026-82672), Finch to 0.24.0, and hpax
-  1.0.4 → 1.1.0 (required by Mint 1.11). Apps depending on this library resolve
-  these in their own mix.lock and should run `mix deps.update mint finch`.
-  Safe combinations: Mint >= 1.10.2 with any Finch, or Mint 1.11.x with Finch
-  >= 0.24.0 (Mint 1.11.0 with Finch 0.23.x can raise on the request after a
-  receive timeout).
+  CVE-2026-92103, and CVE-2026-94194; CVE-2026-82672 was fixed in 1.10.1),
+  Finch to 0.24.0, and hpax 1.0.4 → 1.1.0 (required by Mint 1.11). Apps
+  depending on this library resolve these in their own mix.lock and should run
+  `mix deps.update mint finch`. Safe combinations: Mint 1.10.x at 1.10.2 or
+  later with any Finch, or Mint 1.11.x with Finch 0.24.0 or later (Mint 1.11.0
+  with Finch 0.23.x can raise on the request after a receive timeout).
 
 ## [0.1.0] - 2026-09-17
 
