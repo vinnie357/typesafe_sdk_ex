@@ -1,5 +1,5 @@
 defmodule TypeSafe.Retry do
-  # Retry engine, per docs/spec.md §5: `Retry-After` / `retry-after-ms`
+  # Retry engine, per ADR 0007 and ADR 0009: `Retry-After` / `retry-after-ms`
   # parsing (also behind `TypeSafe.Error.RateLimit.retry_after_ms`), the delay
   # formula, and the Req retry callback. The pure functions take their clock
   # and randomness as arguments. Internal implementation detail.

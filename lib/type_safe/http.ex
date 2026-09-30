@@ -7,7 +7,7 @@ defmodule TypeSafe.HTTP do
 
   @doc """
   Builds the base `Req.Request` for a client: `base_url` plus `req_options`
-  merged in, then the SDK-owned settings forced back on top (spec §4 R2) —
+  merged in, then the SDK-owned settings forced back on top (ADR 0005; known gaps: issue #7) —
   `base_url` and `decode_body: false`/`retry: false` are forced to the
   client's own values, and a caller-supplied `:auth` is dropped so Req's
   built-in `:auth` step can never overwrite the `authorization` header we
@@ -77,7 +77,7 @@ defmodule TypeSafe.HTTP do
     {:error, %TypeSafe.Error{message: malformed_request_message(request)}}
   end
 
-  # Names the actual problem (spec §8, Gate 4 review round 2 R5): whichever
+  # Names the actual problem (ADR 0011): whichever
   # required key is missing or wrong is named, not always ":state" — this
   # clause is only reached when the primary system_one/3 clause's pattern or
   # `is_map(questions)` guard failed, so at least one of the two is bad.
@@ -226,10 +226,10 @@ defmodule TypeSafe.HTTP do
   end
 
   @doc """
-  Decodes a response body per §3: an empty body is `nil`, otherwise JSON is
+  Decodes a response body per ADR 0005: an empty body is `nil`, otherwise JSON is
   tried regardless of content-type, falling back to the raw text on a parse
   failure. Shared with `TypeSafe.Errors`, which needs the same decoded body
-  for both the struct's `body` field and §6 message extraction.
+  for both the struct's `body` field and ADR 0006 message extraction.
   """
   @spec decode_body(Req.Response.t()) :: term()
   def decode_body(%Req.Response{body: body}) when body in [nil, ""], do: nil
@@ -260,7 +260,7 @@ defmodule TypeSafe.HTTP do
     %TypeSafe.Error{message: "Unknown option(s): #{Enum.join(invalid_keys, ", ")}"}
   end
 
-  # Retries are wired per call (spec §5): `client.req` keeps `retry: false`, and
+  # Retries are wired per call (ADR 0007): `client.req` keeps `retry: false`, and
   # the effective client's policy rides in `request.private` for
   # `TypeSafe.Retry.decide/2`.
   defp send_request(client, call_headers, request_options) do

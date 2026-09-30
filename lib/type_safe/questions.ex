@@ -32,7 +32,7 @@ defmodule TypeSafe.Questions do
   end
 
   @doc """
-  Validates `questions` before sending (spec §8): non-empty, and every `score`
+  Validates `questions` before sending (ADR 0011): non-empty, and every `score`
   question (atom- or string-keyed `type`) has a `criteria` list (atom- or
   string-keyed) with at least two entries. Returns `{:ok, questions}`
   unchanged on success — this never rewrites a question.
