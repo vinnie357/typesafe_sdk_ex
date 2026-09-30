@@ -469,4 +469,14 @@ defmodule TypeSafe.ReqOptionsTest do
       end
     end
   end
+
+  describe "connect_options shape" do
+    test "a connect_options that is not a keyword list is rejected and never raises" do
+      for bad <- [5, :x, %{timeout: 1}, [1], [{"a", 1}], [{:timeout, 1} | :tail]] do
+        assert {:error, %Error{message: "req_options connect_options must be a keyword list"}} =
+                 new(connect_options: bad),
+               inspect(bad)
+      end
+    end
+  end
 end

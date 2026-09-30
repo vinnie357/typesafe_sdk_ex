@@ -135,4 +135,73 @@ defmodule TypeSafe.ReqDefaultOptionsTest do
       assert {:ok, %TypeSafe.Client{}} = new(headers: %{"x-a" => "1"})
     end
   end
+
+  describe "the shape of config :req, :default_options" do
+    test "defaults that are not a keyword list are rejected and never raise" do
+      for bad <- [%{finch: []}, [:a], [{:finch, []} | :tail], "x"] do
+        put_defaults(bad)
+
+        assert {:error, %Error{message: message}} = new()
+        assert message == "#{@source} must be a keyword list", inspect(bad)
+      end
+    end
+
+    test "a default connect_options that is not a keyword list names the config" do
+      for bad <- [5, :x, %{timeout: 1}, [1], [{"a", 1}], [{:timeout, 1} | :tail]] do
+        put_defaults(connect_options: bad)
+
+        assert {:error, %Error{message: message}} = new()
+        assert message == "#{@source} connect_options must be a keyword list", inspect(bad)
+      end
+    end
+  end
+
+  describe "repeated default headers entries (Req folds every one)" do
+    @headers_error "#{@source} headers must be a map or a list of {name, value} pairs"
+
+    test "a bad entry is rejected whichever position it has" do
+      bad = [{"a", %{}}]
+      good = [{"b", "c"}]
+
+      for defaults <- [[headers: bad, headers: good], [headers: good, headers: bad]] do
+        put_defaults(defaults)
+
+        assert {:error, %Error{message: @headers_error}} = new(), inspect(defaults)
+      end
+    end
+
+    test "good entries are accepted and Req sends both headers" do
+      put_defaults(headers: [{"a", "1"}], headers: [{"b", "2"}])
+
+      {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @ok_body))
+
+      assert {:ok, []} = TypeSafe.list_models(client)
+      assert [request] = drain_sent()
+      assert Req.Request.get_header(request, "a") == ["1"]
+      assert Req.Request.get_header(request, "b") == ["2"]
+    end
+
+    test "req_options headers replace every default headers entry, so bad defaults are not checked" do
+      put_defaults(headers: [{"a", %{}}], headers: [{"b", "c"}])
+
+      assert {:ok, %TypeSafe.Client{}} = new(headers: [{"x", "y"}])
+    end
+  end
+
+  describe "finch and connect_options from different sources" do
+    @pair_message "req_options and config :req, :default_options must not set both " <>
+                    "finch and connect_options; Req accepts only one of them"
+
+    test "a default finch with a req_options connect_options names both sources" do
+      put_defaults(finch: [size: 2])
+
+      assert {:error, %Error{message: @pair_message}} = new(connect_options: [timeout: 1])
+    end
+
+    test "a default connect_options with a req_options finch names both sources" do
+      put_defaults(connect_options: [timeout: 1])
+
+      assert {:error, %Error{message: @pair_message}} = new(finch: [size: 2])
+    end
+  end
 end
