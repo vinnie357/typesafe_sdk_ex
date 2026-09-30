@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-This SDK is pre-1.0. Only the latest release (currently v0.1.1) receives
-security fixes.
+This SDK is pre-1.0. Only the latest tagged release receives security
+fixes.
 
 ## Reporting a vulnerability
 

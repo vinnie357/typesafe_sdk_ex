@@ -7,7 +7,8 @@ defmodule TypeSafe.Error.RateLimit do
   server's requested retry delay as a whole number of milliseconds. It is read
   from the `retry-after-ms` response header when valid, otherwise from
   `Retry-After` as decimal seconds or an HTTP date (relative to the current
-  time, never negative). It is `nil` when both headers are absent or invalid.
+  time, never negative); dates are read as UTC and any timezone token is
+  ignored. It is `nil` when both headers are absent or invalid.
   """
 
   @enforce_keys [:status, :body, :headers, :request_id, :message, :retry_after_ms]

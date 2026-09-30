@@ -12,7 +12,7 @@ defmodule TypeSafe.Errors do
   @spec from_response(Req.Response.t()) :: Exception.t()
   def from_response(%Req.Response{status: status} = response) do
     decoded_body = TypeSafe.HTTP.decode_body(response)
-    request_id = request_id_from(response.headers)
+    request_id = TypeSafe.Retry.first_value(response.headers, "x-typesafe-request-id")
     message = describe(status, decoded_body, response.body)
 
     build_struct(status, decoded_body, response.headers, request_id, message)
@@ -68,13 +68,6 @@ defmodule TypeSafe.Errors do
   defp struct_for(422), do: TypeSafe.Error.UnprocessableEntity
   defp struct_for(status) when status >= 500, do: TypeSafe.Error.InternalServer
   defp struct_for(_status), do: TypeSafe.Error.API
-
-  defp request_id_from(headers) do
-    case Map.get(headers, "x-typesafe-request-id", []) do
-      [id | _] -> id
-      [] -> nil
-    end
-  end
 
   # §6 message rules, in order: the format is "<status> <detail>", with
   # `describe/3` building that string and `extract_detail/1` finding the

@@ -32,7 +32,9 @@ defmodule TypeSafe.Retry do
     end
   end
 
-  defp first_value(headers, name) do
+  @doc false
+  @spec first_value(%{optional(String.t()) => [String.t()]}, String.t()) :: String.t() | nil
+  def first_value(headers, name) do
     case Map.get(headers, name, []) do
       [value | _] -> value
       [] -> nil
@@ -41,15 +43,22 @@ defmodule TypeSafe.Retry do
 
   defp decimal_to_ms(nil, _factor), do: nil
 
+  # Exact integer arithmetic: a float would overflow or raise on oversize
+  # digit strings. Rounds half up, which is half away from zero for
+  # non-negative values. No cap: max_retry_after_ms belongs to the retry loop.
   defp decimal_to_ms(value, factor) do
-    trimmed = String.trim(value)
-
-    with true <- Regex.match?(~r/\A\d+(\.\d+)?\z/, trimmed),
-         {number, ""} <- Float.parse(trimmed) do
-      round(number * factor)
-    else
-      _not_a_decimal -> nil
+    case Regex.run(~r/\A(\d+)(?:\.(\d+))?\z/, String.trim(value), capture: :all_but_first) do
+      [whole] -> String.to_integer(whole) * factor
+      [whole, fraction] -> whole_and_fraction_to_ms(whole, fraction, factor)
+      nil -> nil
     end
+  end
+
+  defp whole_and_fraction_to_ms(whole, fraction, factor) do
+    scale = Integer.pow(10, byte_size(fraction))
+    rounded = div(String.to_integer(fraction) * factor * 2 + scale, 2 * scale)
+
+    String.to_integer(whole) * factor + rounded
   end
 
   # Values that failed the decimal grammar ("soon", "-5", "1e3", "0x10", "")
@@ -68,10 +77,10 @@ defmodule TypeSafe.Retry do
 
   # restraint: :httpd_util.convert_request_date/1 raises FunctionClauseError on
   # short inputs instead of returning :bad_date; the raise is confined to this
-  # call. Replace with a hand-written IMF/RFC 850/asctime parser if :inets is
-  # ever dropped.
+  # call. Bytes, not chars, so a non-UTF-8 value cannot raise either. Replace
+  # with a hand-written IMF/RFC 850/asctime parser if :inets is ever dropped.
   defp convert_request_date(value) do
-    :httpd_util.convert_request_date(String.to_charlist(value))
+    :httpd_util.convert_request_date(:binary.bin_to_list(value))
   rescue
     FunctionClauseError -> :bad_date
   end

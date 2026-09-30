@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TypeSafe.Error.RateLimit.retry_after_ms` now parses `retry-after-ms`,
   decimal-seconds `Retry-After` values, and HTTP dates (IMF-fixdate, RFC 850,
   asctime), rounded to whole milliseconds; previously only integer seconds
-  were read. `:inets` is now a declared application.
+  were read. `:inets` is now a declared application, so consuming apps start it
+  (adds `inets_sup` and `httpc_manager`).
 
 ## [0.1.1] - 2026-09-29
 
