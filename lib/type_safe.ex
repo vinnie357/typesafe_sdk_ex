@@ -64,7 +64,11 @@ defmodule TypeSafe do
   A `nil` option counts as not given and falls back to the environment. An
   explicit blank (empty or whitespace-only) `:api_key` option is rejected with
   `TYPESAFE_API_KEY is required.` even when `TYPESAFE_API_KEY` is set; a blank
-  environment value counts as unset.
+  environment value counts as unset. The `:api_key` option and every environment
+  value are trimmed of whitespace and of U+FEFF (the byte order mark), so a BOM-only
+  value is blank and a BOM around a key is removed. A key given twice returns
+  `{:error, %TypeSafe.Error{message: "<key> given more than once"}}`, for example
+  `"timeout given more than once"`.
 
   Options:
   - `:api_key` — required unless `TYPESAFE_API_KEY` is set. Must be a string.
@@ -122,7 +126,8 @@ defmodule TypeSafe do
     before any request is sent.
 
   `opts` that is not a keyword list returns
-  `{:error, %TypeSafe.Error{message: "list_models/2 requires a keyword list of options"}}`.
+  `{:error, %TypeSafe.Error{message: "list_models/2 requires a keyword list of options"}}`,
+  and a key given twice returns `"<key> given more than once"`.
 
   A response whose body is not `%{"models" => [...]}` returns `{:error, %TypeSafe.Error{}}`
   instead of raising.
@@ -138,7 +143,11 @@ defmodule TypeSafe do
   529), or `TypeSafe.Error.API` for any other non-2xx status (e.g. 409, 418).
   A transport failure returns `TypeSafe.Error.Timeout` (the effective
   timeout was exceeded) or `TypeSafe.Error.Connection` (any other transport
-  failure — closed socket, DNS, TLS, etc.).
+  failure — closed socket, DNS, TLS, etc.). When more calls run at once than the
+  connection pool holds and none frees up within the pool timeout, the result is
+  `TypeSafe.Error.Connection` with `reason: :pool_timeout`, which is not retried.
+  Size the pool with `req_options: [finch: [size: n]]` or wait longer with
+  `req_options: [finch: [pool_timeout: ms]]`, as the README describes.
 
   Returns `{:ok, [map()]}` (or `{:ok, with_response_result}`) or `{:error, Exception.t()}`.
   """
@@ -179,7 +188,13 @@ defmodule TypeSafe do
     before any request is sent.
 
   `opts` that is not a keyword list returns
-  `{:error, %TypeSafe.Error{message: "system_one/3 requires a keyword list of options"}}`.
+  `{:error, %TypeSafe.Error{message: "system_one/3 requires a keyword list of options"}}`,
+  and a key given twice returns `"<key> given more than once"`.
+
+  Request content that JSON cannot encode (a PID, a tuple, a struct without a
+  `Jason.Encoder`, or invalid UTF-8 in `state`, a question, or an extra key) returns
+  `{:error, %TypeSafe.Error{message: "system_one/3 request cannot be encoded as JSON"}}`
+  and sends nothing. The message never includes the content.
 
   Retryable failures are retried per the client's retry policy, and each retry sends the same
   request body. A timeout is not retried by default: a timed-out request may already have been
@@ -194,7 +209,11 @@ defmodule TypeSafe do
   529), or `TypeSafe.Error.API` for any other non-2xx status (e.g. 409, 418).
   A transport failure returns `TypeSafe.Error.Timeout` (the effective
   timeout was exceeded) or `TypeSafe.Error.Connection` (any other transport
-  failure — closed socket, DNS, TLS, etc.).
+  failure — closed socket, DNS, TLS, etc.). When more calls run at once than the
+  connection pool holds and none frees up within the pool timeout, the result is
+  `TypeSafe.Error.Connection` with `reason: :pool_timeout`, which is not retried.
+  Size the pool with `req_options: [finch: [size: n]]` or wait longer with
+  `req_options: [finch: [pool_timeout: ms]]`, as the README describes.
 
   Returns `{:ok, decoded_body}` (or `{:ok, with_response_result}`) or `{:error, Exception.t()}`.
   """
