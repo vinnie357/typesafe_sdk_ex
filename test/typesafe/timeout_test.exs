@@ -440,4 +440,123 @@ defmodule TypeSafe.TimeoutTest do
     assert {:ok, %TypeSafe.Client{}} = new_client(req_options: [finch: [pool_timeout: 1_000]])
     assert {:ok, %TypeSafe.Client{}} = new_client(req_options: [connect_options: [timeout: 300]])
   end
+
+  describe "resolved req_options (§11 S3c #60, Gate 4 second REJECT, option A')" do
+    # Req collapses a keyword list last-wins (req.ex:590-598), so the invariant
+    # is asserted on the resolved `client.req.options`, never on the input.
+    @timeout_keys [:receive_timeout, :request_timeout]
+
+    defp resolved_violations(options) do
+      finch = Map.get(options, :finch)
+      finch_options = if Keyword.keyword?(finch), do: finch, else: []
+
+      top = for key <- @timeout_keys, Map.has_key?(options, key), do: {:top, key}
+      nested = for key <- @timeout_keys, Keyword.has_key?(finch_options, key), do: {:finch, key}
+      top ++ nested ++ pair_violation(finch, options)
+    end
+
+    defp pair_violation(nil, _options), do: []
+
+    defp pair_violation(_finch, options) do
+      if Map.has_key?(options, :connect_options), do: [:finch_with_connect_options], else: []
+    end
+
+    defp resolved_options(req_options) do
+      case new_client(req_options: req_options) do
+        {:ok, client} -> {:ok, client.req.options}
+        {:error, %Error{}} = rejected -> rejected
+      end
+    end
+
+    @entries [
+      [finch: [pool_size: 2]],
+      [finch: [receive_timeout: 5]],
+      [finch: [request_timeout: 5]],
+      [finch: :some_pool],
+      [receive_timeout: 1],
+      [request_timeout: 2],
+      [connect_options: [timeout: 1]],
+      [connect_options: [timeout: 2]]
+    ]
+
+    defp sequences do
+      pairs = for a <- @entries, b <- @entries, do: a ++ b
+      triples = for a <- @entries, b <- @entries, c <- @entries, do: a ++ b ++ c
+      @entries ++ pairs ++ triples
+    end
+
+    test "no accepted req_options resolves to a caller timeout override" do
+      for req_options <- sequences() do
+        case resolved_options(req_options) do
+          {:error, %Error{}} ->
+            :ok
+
+          {:ok, options} ->
+            assert resolved_violations(options) == [],
+                   "accepted #{inspect(req_options)}, which resolves to " <>
+                     inspect(Map.take(options, [:finch, :connect_options | @timeout_keys]))
+        end
+      end
+    end
+
+    test "the named rows are rejected or resolve cleanly, and never raise" do
+      rows = [
+        [finch: [pool_size: 2], finch: [receive_timeout: 5]],
+        [finch: [receive_timeout: 5], finch: [pool_size: 2]],
+        [finch: [pool_size: 2], finch: [request_timeout: 5]],
+        [finch: :some_pool, finch: [receive_timeout: 5]],
+        [receive_timeout: 1, receive_timeout: 2],
+        [connect_options: [timeout: 1], connect_options: [timeout: 2], finch: [pool_size: 2]]
+      ]
+
+      for row <- rows do
+        case resolved_options(row) do
+          {:error, %Error{}} -> :ok
+          {:ok, options} -> assert resolved_violations(options) == [], inspect(row)
+        end
+      end
+    end
+
+    test "the reviewer's repro and its request_timeout and atom variants are rejected" do
+      assert {:error, %Error{}} =
+               new_client(req_options: [finch: [pool_size: 2], finch: [receive_timeout: 5]])
+
+      assert {:error, %Error{}} =
+               new_client(req_options: [finch: [pool_size: 2], finch: [request_timeout: 5]])
+
+      assert {:error, %Error{}} =
+               new_client(req_options: [finch: :some_pool, finch: [receive_timeout: 5]])
+
+      assert {:error, %Error{}} =
+               new_client(req_options: [receive_timeout: 1, receive_timeout: 2])
+    end
+
+    # Green today: A' must not turn duplicates into an error, or `base ++
+    # overrides` composition (which Req supports) would break.
+    test "a benign duplicate stays accepted, and Req keeps the last value" do
+      assert {:ok, %{finch: [pool_size: 3]}} =
+               resolved_options(finch: [pool_size: 2], finch: [pool_size: 3])
+    end
+
+    test "the request the adapter sees carries no finch timeout override" do
+      for row <- [
+            [finch: [pool_size: 2], finch: [receive_timeout: 5]],
+            [finch: [receive_timeout: 5], finch: [pool_size: 2]]
+          ] do
+        case new_client(timeout: 2_000, req_options: [adapter: StubAdapter] ++ row) do
+          {:error, %Error{}} ->
+            :ok
+
+          {:ok, client} ->
+            client = StubAdapter.put_stub(client, StubAdapter.respond(200, @ok_body))
+
+            assert {:ok, _data} = TypeSafe.list_models(client)
+            assert [request] = drain_sent()
+            assert request.options[:receive_timeout] == 2_000
+            finch = request.options[:finch] || []
+            assert Enum.filter(@timeout_keys, &Keyword.has_key?(finch, &1)) == [], inspect(row)
+        end
+      end
+    end
+  end
 end
