@@ -186,7 +186,7 @@ defmodule TypeSafe.ReqOptionsTest do
       end
     end
 
-    test "size, pool_size and start_pool_metrics? are finch keys, so they are rejected at the top level" do
+    test "size, pool_size, start_pool_metrics? and pool_timeout are finch keys, so they are rejected at the top level" do
       for key <- [:size, :pool_size, :start_pool_metrics?, :pool_timeout] do
         assert {:error, %Error{message: message}} = new([{key, 1}])
         assert message == unsupported(key)
@@ -429,6 +429,44 @@ defmodule TypeSafe.ReqOptionsTest do
         end
 
       assert accepted != []
+    end
+  end
+
+  describe "header values" do
+    test "a value that is not a binary or a list of binaries is rejected, and nothing raises" do
+      bad = [
+        %{"a" => %{}},
+        [{"a", %{}}],
+        [{"a", 1}],
+        [{"a", :v}],
+        [{"a", ["x", 1]}],
+        [{"a", nil}]
+      ]
+
+      for headers <- bad do
+        assert {:error, %Error{message: @headers_message}} = new(headers: headers),
+               inspect(headers)
+      end
+    end
+
+    # Probed on Req 0.7.4: a list value stays a list, so the adapter sees two values.
+    test "a binary or a list of binaries is accepted and reaches the adapter" do
+      cases = [
+        {[{"a", "v"}], ["v"]},
+        {[{"a", ["v1", "v2"]}], ["v1", "v2"]},
+        {%{"a" => "v"}, ["v"]},
+        {%{a: ["v"]}, ["v"]}
+      ]
+
+      for {headers, expected} <- cases do
+        {:ok, client} =
+          StubAdapter.client(StubAdapter.respond(200, @ok_body), req_options: [headers: headers])
+
+        assert {:ok, []} = TypeSafe.list_models(client)
+        assert [request] = drain_sent()
+        assert Req.Request.get_header(request, "a") == expected, inspect(headers)
+        assert Req.Request.get_header(request, "authorization") == ["Bearer k"]
+      end
     end
   end
 end

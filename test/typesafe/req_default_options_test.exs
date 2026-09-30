@@ -70,6 +70,13 @@ defmodule TypeSafe.ReqDefaultOptionsTest do
       end
     end
 
+    test "a default header value that is not a binary or list of binaries names the config" do
+      put_defaults(headers: [{"a", %{}}])
+
+      assert {:error, %Error{message: message}} = new()
+      assert message == "#{@source} headers must be a map or a list of {name, value} pairs"
+    end
+
     test "the source is still config :req, :default_options when req_options sets other keys" do
       put_defaults(bogus: 1)
 
