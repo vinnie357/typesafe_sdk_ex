@@ -632,6 +632,10 @@ defmodule TypeSafe.TelemetryTest do
       assert redact(%{"authorization" => ["Bearer   #{@secret}"]}) ==
                %{"authorization" => ["Bearer ***cdef"]}
 
+      # An allowed scheme keeps only its second token; a third token is ignored.
+      assert redact(%{"authorization" => ["Bearer abcd efghijklmn"]}) ==
+               %{"authorization" => ["Bearer ***"]}
+
       # "Scheme" is not an allowlisted scheme, so the whole value is masked, with no tail.
       assert redact(%{"authorization" => ["Scheme abcd efghijklmn"]}) ==
                %{"authorization" => ["***"]}
