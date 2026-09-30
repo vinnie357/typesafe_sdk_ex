@@ -65,9 +65,11 @@ defmodule TypeSafe.Telemetry do
   ## Redaction
 
   Credential headers (`authorization`, `proxy-authorization`, `x-api-key`, `cookie`,
-  `set-cookie`) are redacted before the event is emitted, so no handler sees their
-  values. Any other header, such as a custom `default_headers` entry, is reported as
-  given.
+  `set-cookie`) are redacted before the event is emitted. A value that starts with a
+  letters-only word and a space keeps that word as a "scheme", so a secret of that
+  shape is partly visible (`"LETTERSONLYSECRETKEY x"` becomes
+  `"LETTERSONLYSECRETKEY ***"`). Any other header, such as a custom `default_headers`
+  entry, is reported as given.
   The `%Req.Request{}` is never put in metadata. See `redact_headers/1`.
   """
 
