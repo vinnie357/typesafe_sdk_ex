@@ -12,17 +12,19 @@ The JS SDK exposes a `TypeSafeClient` class, a lazy `APIPromise`, and a `Models`
 1. `TypeSafe` is the facade. It delegates to `TypeSafe.Config`, `TypeSafe.HTTP`, and `TypeSafe.Questions`. These, `TypeSafe.Errors`, and `TypeSafe.Retry` carry `@moduledoc false`.
 2. The public modules are `TypeSafe`, `TypeSafe.Client`, `TypeSafe.RetryPolicy`, `TypeSafe.Error`, and the ten structs under `TypeSafe.Error.*`.
 3. `new/1`, `system_one/3`, and `list_models/2` return `{:ok, value}` or `{:error, exception}`. The SDK defines no bang variants.
-4. Invalid options, an invalid request, and an unexpected `/v1/models` shape return `{:error, %TypeSafe.Error{}}`. JS throws in these cases.
+4. Invalid options, an invalid request, and an unexpected `/v1/models` shape return `{:error, %TypeSafe.Error{}}`. JS throws in these cases. Call `opts` that is not a keyword list returns the same, with the messages `list_models/2 requires a keyword list of options` and `system_one/3 requires a keyword list of options`, mirroring `new/1`'s `new/1 requires a keyword list of options`.
 5. `new/1` returns `{:error, _}` for a non-keyword `opts`, an unknown option key, a wrong-typed option value, and a `get_env` function that returns a non-string. ADR 0004 lists the checks.
-6. These paths raise today. Issues #7 and #10 track the ones marked with an issue number; the rest are by design:
+6. These paths raise today. Issues #7 and #12 track the ones marked with an issue number; the rest are by design:
    - `new/1` with a `get_env` function that itself raises.
    - `new/1` with an unknown key inside `req_options`: Req raises `ArgumentError` (#7).
    - A call with `req_options: [http_errors: :raise]` after a non-2xx response raises `RuntimeError` (#7).
    - A first call on a client built with `finch: [name: ...]` or the deprecated `finch: :name` raises `ArgumentError` (#7).
-   - `list_models(client, :x)` raises `FunctionClauseError`, `list_models(client, [1])` raises `ArgumentError`, and `system_one(client, request, :x)` raises `FunctionClauseError`: call `opts` that is not a keyword list (#10).
    - `system_one/3` with a request that is not a map raises `FunctionClauseError`.
    - A builder call that fails its guard raises `FunctionClauseError` (ADR 0011).
-   The list comes from running each case on 2026-09-29; it is not a proof that no other path raises.
+   - A non-2xx error body whose validation `loc` holds a JSON object, such as `{"detail":[{"msg":"m","loc":[{"a":1}]}]}`, raises `Protocol.UndefinedError` while the message is built. The server controls the body, so this blocks v0.2.0 (#12: https://github.com/vinnie357/typesafe_sdk_ex/issues/12).
+   - A first argument that is not a `%TypeSafe.Client{}` (`list_models(:x)`, `system_one(:x, request)`) raises `FunctionClauseError` (#12).
+   - Request content that JSON cannot encode (a PID or a tuple in `state`, or in `noul` criteria) raises `Protocol.UndefinedError` from the JSON encoding (#12).
+   The list comes from running each case on 2026-09-30; it is not a proof that no other path raises.
 7. `with_response: true` returns `%{data: term, response: %Req.Response{}, request_id: String.t() | nil}` and replaces `APIPromise` and `.withResponse()` (`api-promise.ts:7-14`). The SDK checks the option is a boolean before sending a request.
 8. `list_models/2` replaces `client.models.list` (`models.ts:15-27`). The SDK defines no `Models` module. It returns the list under `"models"`. Any other body shape returns `{:error, %TypeSafe.Error{}}`.
 9. Responses are decoded, string-keyed maps. The SDK validates none of them except the `/v1/models` shape.
@@ -42,7 +44,7 @@ The JS SDK exposes a `TypeSafeClient` class, a lazy `APIPromise`, and a `Models`
 
 ### Negative
 
-- The `new/1` doc claims it "never raises on bad input", which is broader than the built behavior. The paths in decision 6 raise. Issue #7 tracks the `req_options` cases (https://github.com/vinnie357/typesafe_sdk_ex/issues/7) and issue #10 tracks the non-keyword call options (https://github.com/vinnie357/typesafe_sdk_ex/issues/10).
+- The `new/1` doc claims it "never raises on bad input", which is broader than the built behavior. The paths in decision 6 raise. Issue #7 tracks the `req_options` cases (https://github.com/vinnie357/typesafe_sdk_ex/issues/7) and issue #12 tracks the other paths (https://github.com/vinnie357/typesafe_sdk_ex/issues/12).
 - Callers get maps, not structs, so a typo in a key returns `nil` and no compile-time error. The SDK trades that for a smaller surface and no response validation.
 - A `system_one/3` call with a `nil` request raises `FunctionClauseError`. The first PR review accepted this as a caller error outside the documented contract.
 
@@ -62,4 +64,3 @@ The JS SDK exposes a `TypeSafeClient` class, a lazy `APIPromise`, and a `Models`
 - PR #1 review round 2, findings R4 and R6: https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5715301129
 - PR #1 review round 3, findings D5 (public docs cite no internal document) and D6: https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5722393470
 - Open `req_options` gaps: https://github.com/vinnie357/typesafe_sdk_ex/issues/7
-- Open never-raise gaps (non-keyword call options): https://github.com/vinnie357/typesafe_sdk_ex/issues/10

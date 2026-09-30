@@ -277,4 +277,44 @@ defmodule TypeSafe.ErrorTest do
     assert error.body == %{"error" => "boom"}
     assert error.message == "500 boom"
   end
+
+  # Issue #10 (ADR 0006 known gaps). JS `extractMessage` returns an empty
+  # `error`/`message`/`detail` string as-is (errors.ts:20,21,22,23,24) and does
+  # NOT continue to later fields; `describe` then treats the empty detail as
+  # falsy (errors.ts:62) and falls through to the raw-body form (errors.ts:64-65).
+  test "an empty-string error, message, or detail falls through to the raw body text" do
+    cases = [
+      ~s({"error":""}),
+      ~s({"message":""}),
+      ~s({"detail":""}),
+      ~s({"error":{"message":""}}),
+      ~s({"detail":{"message":""}}),
+      # JS stops at the first present string (errors.ts:20), so the later
+      # non-empty `message` does not win.
+      ~s({"error":"","message":"later"}),
+      ~s({"error":{"message":""},"message":"later"}),
+      ~s({"message":"","detail":"later"})
+    ]
+
+    for body <- cases do
+      assert {:ok, client} = error_client(500, body)
+      assert {:error, %TypeSafe.Error.InternalServer{} = error} = TypeSafe.list_models(client)
+
+      assert error.message == "500 " <> body
+    end
+  end
+
+  # Issue #10. JS parses the text `null` to `null` (client.ts:478 for a
+  # JSON content-type, client.ts:485 without one), which is
+  # not `undefined`, so `describe` reaches `JSON.stringify(null)` (errors.ts:64)
+  # and gives "<status> null". The Elixir body is `nil` (decoded JSON null).
+  test "a JSON null error body gives <status> null, not no body" do
+    for headers <- [[{"content-type", "application/json"}], []] do
+      assert {:ok, client} = error_client(500, "null", headers)
+      assert {:error, %TypeSafe.Error.InternalServer{} = error} = TypeSafe.list_models(client)
+
+      assert error.message == "500 null"
+      assert error.body == nil
+    end
+  end
 end

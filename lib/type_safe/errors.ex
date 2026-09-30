@@ -72,16 +72,19 @@ defmodule TypeSafe.Errors do
   # ADR 0006 message rules, in order: the format is "<status> <detail>", with
   # `describe/3` building that string and `extract_detail/1` finding the
   # detail (errors.ts:16-37).
+  # An empty detail counts as none (errors.ts:62) but still ends the search
+  # (errors.ts:20-24): the fallback is keyed on the RAW body, so a JSON `null`
+  # body (decoded to `nil`) reads "null", not "no body".
   defp describe(status, decoded_body, raw_body) do
     case extract_detail(decoded_body) do
-      {:ok, detail} -> "#{status} #{detail}"
-      :error -> "#{status} #{fallback_detail(decoded_body, raw_body)}"
+      {:ok, detail} when detail != "" -> "#{status} #{detail}"
+      _no_detail -> "#{status} #{fallback_detail(raw_body)}"
     end
   end
 
-  defp fallback_detail(nil, _raw_body), do: "status code (no body)"
-  defp fallback_detail(_decoded_body, raw_body) when is_binary(raw_body), do: truncate(raw_body)
-  defp fallback_detail(_decoded_body, raw_body), do: truncate(inspect(raw_body))
+  defp fallback_detail(raw_body) when raw_body in [nil, ""], do: "status code (no body)"
+  defp fallback_detail(raw_body) when is_binary(raw_body), do: truncate(raw_body)
+  defp fallback_detail(raw_body), do: truncate(inspect(raw_body))
 
   defp truncate(text) do
     case String.length(text) > @max_raw_body_in_message do
@@ -90,9 +93,8 @@ defmodule TypeSafe.Errors do
     end
   end
 
-  # Rule 1: body is a (non-empty) string -> the string.
-  defp extract_detail(body) when is_binary(body) and body != "", do: {:ok, body}
-  defp extract_detail(body) when is_binary(body), do: :error
+  # Rule 1: body is a string -> the string.
+  defp extract_detail(body) when is_binary(body), do: {:ok, body}
   # Rule 2: `error` is a string.
   defp extract_detail(%{"error" => error}) when is_binary(error), do: {:ok, error}
   # Rule 3: `error.message`.

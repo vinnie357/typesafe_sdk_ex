@@ -71,7 +71,7 @@ Req decodes bodies by content-type (`req@0.7.4 lib/req/steps.ex:1163-1176`), so 
 - `req_options` promises less than its docs imply until issue #7 closes. Two of the gaps contradict the words "never overwrite" in `TypeSafe.HTTP.new_client_req/3` and "never raises" in `TypeSafe.new/1`.
 - The SDK owns the denylist. A new Req option that overrides an SDK setting passes until someone adds it.
 - Decision 12 deviates from JS values: JS sends `typesafe-sdk/<VERSION>` for both identity headers and `node/22.1.0 (darwin; arm64)`-style runtime strings (`client.ts:352-367`, `src/runtime.ts:21-31`). The Elixir values are the SDK's choice. Whether the server parses these headers is unverified.
-- A JSON `null` error body reads as "no body" (ADR 0006), and a `null` success body returns `{:ok, nil}`.
+- A JSON `null` error body gives the message `"<status> null"` with `body: nil` (ADR 0006 decision 13), and a `null` success body returns `{:ok, nil}`.
 - A caller who needs repeated header names must use `req_options` directly, subject to decisions 1 to 10.
 
 ## Alternatives considered

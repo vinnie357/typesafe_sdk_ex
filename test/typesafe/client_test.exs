@@ -900,4 +900,63 @@ defmodule TypeSafe.ClientTest do
       assert {:ok, []} = TypeSafe.list_models(client)
     end
   end
+
+  # Issue #10: ADR 0003 decision 4 (call options that are not a keyword list
+  # return an error, they never raise) and ADR 0004 decision 7 (operator
+  # ruling: an explicit blank api_key is rejected even when the environment
+  # supplies a key).
+  describe "issue #10: never-raise call options and blank api_key" do
+    test "an explicit blank api_key is rejected even when TYPESAFE_API_KEY is set" do
+      env = %{"TYPESAFE_API_KEY" => "env-key"}
+
+      for api_key <- ["", "   ", " \t\n "] do
+        assert {:error, %TypeSafe.Error{message: "TYPESAFE_API_KEY is required."}} =
+                 TypeSafe.new(api_key: api_key, get_env: fn name -> Map.get(env, name) end)
+      end
+    end
+
+    # Guard row, green today: "nil = not given" (R1) and an explicit non-blank
+    # key winning over the environment must survive the blank-key fix.
+    test "guard: a nil api_key still resolves to the env key, and a given key beats the env key" do
+      env = %{"TYPESAFE_API_KEY" => "env-key"}
+
+      for {api_key, expected} <- [{nil, "Bearer env-key"}, {"code-key", "Bearer code-key"}] do
+        assert {:ok, client} =
+                 StubAdapter.client(
+                   StubAdapter.respond(200, ~s({"models":[]})),
+                   api_key: api_key,
+                   get_env: fn name -> Map.get(env, name) end
+                 )
+
+        assert {:ok, []} = TypeSafe.list_models(client)
+        assert_received {:sent, request}
+        assert Req.Request.get_header(request, "authorization") == [expected]
+      end
+    end
+
+    test "list_models/2 returns an error for call options that are not a keyword list" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, ~s({"models":[]})))
+
+      for opts <- [:x, [1]] do
+        assert {:error,
+                %TypeSafe.Error{message: "list_models/2 requires a keyword list of options"}} =
+                 TypeSafe.list_models(client, opts)
+      end
+
+      refute_received {:sent, _request}
+    end
+
+    test "system_one/3 returns an error for call options that are not a keyword list" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+      request = %{state: "s", questions: %{"q" => TypeSafe.noul("q")}}
+
+      for opts <- [:x, [1]] do
+        assert {:error,
+                %TypeSafe.Error{message: "system_one/3 requires a keyword list of options"}} =
+                 TypeSafe.system_one(client, request, opts)
+      end
+
+      refute_received {:sent, _request}
+    end
+  end
 end

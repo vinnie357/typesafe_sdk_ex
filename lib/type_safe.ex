@@ -61,8 +61,10 @@ defmodule TypeSafe do
   Resolves `:api_key`, `:base_url`, `:default_model`, and `:log_level` in this
   order: the option, then the matching `TYPESAFE_*` environment variable (read
   through `:get_env`, which defaults to `&System.get_env/1`), then a default.
-  A blank (empty or whitespace-only) option or environment value counts as
-  unset for `:api_key`.
+  A `nil` option counts as not given and falls back to the environment. An
+  explicit blank (empty or whitespace-only) `:api_key` option is rejected with
+  `TYPESAFE_API_KEY is required.` even when `TYPESAFE_API_KEY` is set; a blank
+  environment value counts as unset.
 
   Options:
   - `:api_key` — required unless `TYPESAFE_API_KEY` is set. Must be a string.
@@ -119,6 +121,9 @@ defmodule TypeSafe do
     time, so a connect timeout reports it too. Invalid values (including `nil`) are rejected
     before any request is sent.
 
+  `opts` that is not a keyword list returns
+  `{:error, %TypeSafe.Error{message: "list_models/2 requires a keyword list of options"}}`.
+
   A response whose body is not `%{"models" => [...]}` returns `{:error, %TypeSafe.Error{}}`
   instead of raising.
 
@@ -173,6 +178,9 @@ defmodule TypeSafe do
     time, so a connect timeout reports it too. Invalid values (including `nil`) are rejected
     before any request is sent.
 
+  `opts` that is not a keyword list returns
+  `{:error, %TypeSafe.Error{message: "system_one/3 requires a keyword list of options"}}`.
+
   Retryable failures are retried per the client's retry policy, and each retry sends the same
   request body. A timeout is not retried by default: a timed-out request may already have been
   processed and billed, and the API has no idempotency key. Opt in with
@@ -212,7 +220,9 @@ defmodule TypeSafe do
 
   @doc """
   Builds a `noul` question with `instructions` and `criteria`. `criteria`
-  may be `nil`, or a map with a `true` key, a `false` key, or both.
+  must be `nil` or a map, ideally with a `true` key, a `false` key, or both;
+  the keys are not checked. Any other `criteria` (a string, list, or number)
+  raises `FunctionClauseError`, like `choice/2` and `score/2`.
   """
   @spec noul(term(), map() | nil) :: question()
   defdelegate noul(instructions, criteria), to: TypeSafe.Questions

@@ -27,6 +27,30 @@ defmodule TypeSafe.QuestionsTest do
     assert TypeSafe.noul("q", nil) == %{type: "noul", instructions: "q", criteria: nil}
   end
 
+  # Issue #10, ADR 0011 decision 2 (builders guard their container and raise
+  # FunctionClauseError). The docs describe noul `criteria` as "an object with
+  # `true` and `false` descriptions" (docs.typesafe.ai/primitives/noul.md) and
+  # the JS type is `{true?, false?} | null | undefined` (types.ts:26-31), so a
+  # string, list, or other non-map term is a caller error.
+  test "noul/2 raises FunctionClauseError for criteria that is not a map or nil" do
+    for criteria <- ["str", [1], [], 1, :x, true] do
+      assert_raise FunctionClauseError, fn -> TypeSafe.noul("i", criteria) end
+    end
+  end
+
+  # Guard row, green today: the maps and nil the docs allow keep passing
+  # through unchanged after the guard is added, including an empty map and
+  # string keys (criteria decoded from JSON config).
+  test "guard: noul/2 passes nil and any map through unchanged" do
+    for criteria <- [nil, %{}, %{"true" => "yes", "false" => "no"}] do
+      assert TypeSafe.noul("i", criteria) == %{
+               type: "noul",
+               instructions: "i",
+               criteria: criteria
+             }
+    end
+  end
+
   # docs/spec.md §11 S4 #4 (client.test.ts:263-269)
   test "choice passes the criteria map through untouched" do
     assert TypeSafe.choice("q", %{a: "desc", b: nil}) ==
