@@ -203,5 +203,15 @@ defmodule TypeSafe.ReqDefaultOptionsTest do
 
       assert {:error, %Error{message: @pair_message}} = new(finch: [size: 2])
     end
+
+    test "both keys from the defaults keep the single-source config message" do
+      put_defaults(finch: [size: 2], connect_options: [timeout: 1])
+
+      assert {:error, %Error{message: message}} = new()
+
+      assert message ==
+               "#{@source} must not set both finch and connect_options; " <>
+                 "Req accepts only one of them"
+    end
   end
 end
