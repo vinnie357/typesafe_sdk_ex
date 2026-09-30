@@ -86,6 +86,8 @@ defmodule TypeSafe.TelemetryTest do
     fn request -> {request, step_result({status, body})} end
   end
 
+  defp texts(events), do: Enum.map(lines(events), &elem(&1, 1))
+
   defp events, do: TelemetryForwarder.drain()
 
   defp list_models(client, opts \\ []), do: TypeSafe.list_models(client, opts)
@@ -148,6 +150,11 @@ defmodule TypeSafe.TelemetryTest do
       refute events == [], "no events for #{name} at #{level}"
       assert Enum.all?(events, fn {_event, _m, metadata} -> metadata.log_level == level end)
       assert lines(events) == [], "lines for #{name} at #{level}"
+
+      # E6: URL, headers and bodies are debug-only, at every other level too.
+      for {_event, _measurements, metadata} <- events, key <- [:url, :headers, :body] do
+        refute Map.has_key?(metadata, key), "#{key} leaked for #{name} at #{level}"
+      end
     end
   end
 
@@ -236,7 +243,7 @@ defmodule TypeSafe.TelemetryTest do
     assert [{@start, _, start} | _rest] = events()
     assert %{method: :post, path: "/v1/systemone", body: body, headers: headers} = start
     assert is_binary(body)
-    assert body == sent.body
+    assert body == IO.iodata_to_binary(sent.body)
     assert %{"content-type" => ["application/json"]} = headers
   end
 
@@ -273,6 +280,37 @@ defmodule TypeSafe.TelemetryTest do
     assert %{request_number: ^n} = retry
   end
 
+  test "a retried :debug call sends x-typesafe-retry-count on the second attempt (client.ts:365)" do
+    stub = sequence([{429, ~s({"error":"slow"}), [{"retry-after-ms", "0"}]}, {200, @ok_body}])
+    client = client(stub, log_level: :debug)
+
+    assert {:ok, []} = list_models(client)
+
+    starts = for {@start, _, metadata} <- events(), do: metadata
+    assert [first, second] = starts
+    refute Map.has_key?(first.headers, "x-typesafe-retry-count")
+    assert %{"x-typesafe-retry-count" => ["1"]} = second.headers
+  end
+
+  test "a non-zero Retry-After is the delay in the event and in the line" do
+    stub = sequence([{429, ~s({"error":"slow"}), [{"retry-after-ms", "1"}]}, {200, @ok_body}])
+    client = client(stub, log_level: :info)
+
+    assert {:ok, []} = list_models(client)
+
+    events = events()
+
+    assert [{@retry, %{delay_ms: 1} = measurements, _}] =
+             Enum.filter(events, &match?({@retry, _, _}, &1))
+
+    assert measurements == %{delay_ms: 1}
+
+    assert Enum.any?(
+             texts(events),
+             &String.ends_with?(&1, "retrying in 1ms (retry 1/2) after 429")
+           )
+  end
+
   test "a per-call max_retries is the total in the retry line" do
     client = client(always(503, ~s({"error":"down"})), log_level: :info, retry: [max_retries: 5])
 
@@ -282,7 +320,7 @@ defmodule TypeSafe.TelemetryTest do
     assert [_one_retry] = Enum.filter(events, fn {event, _m, _md} -> event == @retry end)
 
     assert Enum.any?(
-             lines(events),
+             texts(events),
              &String.ends_with?(&1, "retrying in 0ms (retry 1/1) after 503")
            )
   end
@@ -321,7 +359,9 @@ defmodule TypeSafe.TelemetryTest do
       end)
 
     assert length(all_events) >= 6
-    assert all_events |> lines() |> Enum.all?(&(not String.contains?(&1, @secret)))
+    all_lines = texts(all_events)
+    refute all_lines == []
+    assert Enum.all?(all_lines, &(not String.contains?(&1, @secret)))
     refute inspect(all_events, limit: :infinity, printable_limit: :infinity) =~ @secret
   end
 
@@ -379,6 +419,79 @@ defmodule TypeSafe.TelemetryTest do
     case self() == test_pid do
       true -> raise "handler crash"
       false -> :ok
+    end
+  end
+
+  # ---- log_lines/3, the pure seam ---------------------------------------------
+
+  describe "log_lines/3" do
+    @levels [:debug, :info, :warning, :error, :off]
+    @rank %{debug: 0, info: 1, warning: 2, error: 3, off: 4}
+
+    defp base(level),
+      do: %{request_number: 7, method: :get, path: "/v1/models", attempt: 0, log_level: level}
+
+    defp duration, do: %{duration: System.convert_time_unit(1234, :millisecond, :native)}
+
+    defp stop(level, fields),
+      do: Map.merge(Map.merge(base(level), %{status: nil, request_id: nil, error: nil}), fields)
+
+    test "a response summary, with and without a request id" do
+      assert [{:info, "#7 GET /v1/models <- 200 in 1234ms"}] =
+               telemetry(:log_lines, [@stop, duration(), stop(:info, %{status: 200})])
+
+      assert [{:info, "#7 GET /v1/models <- 200 in 1234ms (request r1)"}] =
+               telemetry(:log_lines, [
+                 @stop,
+                 duration(),
+                 stop(:info, %{status: 200, request_id: "r1"})
+               ])
+    end
+
+    test "a timeout and a connection error" do
+      timeout = %Error.Timeout{message: "Request timed out after 10ms.", timeout_ms: 10}
+      connection = %Error.Connection{message: "Connection error: x", reason: :econnrefused}
+
+      assert [{:info, "#7 GET /v1/models timed out after 1234ms"}] =
+               telemetry(:log_lines, [@stop, duration(), stop(:info, %{error: timeout})])
+
+      assert [{:info, "#7 GET /v1/models connection error after 1234ms " <> rest}] =
+               telemetry(:log_lines, [@stop, duration(), stop(:info, %{error: connection})])
+
+      assert rest == inspect(connection)
+    end
+
+    test "a retry" do
+      metadata = Map.merge(base(:info), %{retry: 2, max_retries: 3, reason: 503})
+
+      assert [{:info, "#7 GET /v1/models retrying in 250ms (retry 2/3) after 503"}] =
+               telemetry(:log_lines, [@retry, %{delay_ms: 250}, metadata])
+    end
+
+    test "a line is kept when its level ranks at or above the client's; :off keeps nothing" do
+      start_md = fn level ->
+        Map.merge(base(level), %{url: "https://x.test/v1/models", headers: %{}, body: nil})
+      end
+
+      for client_level <- @levels do
+        start = telemetry(:log_lines, [@start, %{}, start_md.(client_level)])
+        summary = telemetry(:log_lines, [@stop, duration(), stop(client_level, %{status: 200})])
+
+        assert Enum.map(start, &elem(&1, 0)) ==
+                 keep(:debug, client_level),
+               "debug line at #{client_level}"
+
+        assert Enum.map(summary, &elem(&1, 0)) ==
+                 keep(:info, client_level),
+               "info line at #{client_level}"
+      end
+    end
+
+    defp keep(line_level, client_level) do
+      case @rank[line_level] >= @rank[client_level] do
+        true -> [line_level]
+        false -> []
+      end
     end
   end
 
@@ -491,8 +604,12 @@ defmodule TypeSafe.TelemetryTest do
     assert {:ok, []} = list_models(client)
 
     assert [_, _, _, _, _] = events = events()
-    assert [retry_line] = events |> lines() |> Enum.filter(&(&1 =~ "retrying in"))
+    assert [retry_line] = events |> texts() |> Enum.filter(&(&1 =~ "retrying in"))
     assert retry_line =~ ~r{^#\d+ GET /v1/models retrying in 0ms \(retry 1/2\) after }
+
+    assert [{@retry, _, %{reason: %Error.Connection{reason: :econnrefused}}}] =
+             Enum.filter(events, &match?({@retry, _, _}, &1))
+
     assert String.ends_with?(retry_line, "after Connection error: connection refused")
   end
 
@@ -506,8 +623,12 @@ defmodule TypeSafe.TelemetryTest do
 
     assert {:ok, []} = list_models(client)
 
-    assert [retry_line] = events() |> lines() |> Enum.filter(&(&1 =~ "retrying in"))
+    events = events()
+    assert [retry_line] = events |> texts() |> Enum.filter(&(&1 =~ "retrying in"))
     assert String.ends_with?(retry_line, "after Request timed out after 1000ms.")
+
+    assert [{@retry, _, %{reason: %Error.Timeout{}}}] =
+             Enum.filter(events, &match?({@retry, _, _}, &1))
   end
 
   # ---- pool exhaustion (same trigger as pool_test.exs, issue #12) -------------
@@ -597,7 +718,7 @@ defmodule TypeSafe.TelemetryTest do
       assert %{attempt: 0} = start
       assert %{status: nil, error: %Error.Connection{reason: :pool_timeout}} = stop
 
-      assert Enum.any?(lines(mine), &(&1 =~ ~r{connection error after \d+ms}))
+      assert Enum.any?(texts(mine), &(&1 =~ ~r{connection error after \d+ms}))
 
       Task.shutdown(holder, :brutal_kill)
     end

@@ -31,7 +31,7 @@ defmodule TypeSafe.DefaultLoggerTest do
   # `TypeSafe.attach_default_logger/1` does not exist until the implementation
   # lands; going through `apply/3` keeps the file compiling (see telemetry_test.exs).
   defp typesafe(fun, args), do: apply(TypeSafe, fun, args)
-  defp attach(opts \\ []), do: typesafe(:attach_default_logger, [opts])
+  defp attach(opts), do: typesafe(:attach_default_logger, [opts])
   defp detach, do: typesafe(:detach_default_logger, [])
 
   defp client(opts) do
@@ -45,8 +45,8 @@ defmodule TypeSafe.DefaultLoggerTest do
   end
 
   test "attach and detach return telemetry's own results" do
-    assert :ok = attach()
-    assert {:error, :already_exists} = attach()
+    assert :ok = typesafe(:attach_default_logger, [])
+    assert {:error, :already_exists} = attach([])
     assert :ok = detach()
     assert {:error, :not_found} = detach()
   end
@@ -57,7 +57,7 @@ defmodule TypeSafe.DefaultLoggerTest do
   end
 
   test "while attached, an :info client's call is logged at :info with the prefix" do
-    assert :ok = attach()
+    assert :ok = attach([])
 
     log = logged(client(log_level: :info))
 
@@ -65,16 +65,17 @@ defmodule TypeSafe.DefaultLoggerTest do
   end
 
   test "while attached, a :warning client's call is not logged" do
-    assert :ok = attach()
+    assert :ok = attach([])
 
     refute logged(client(log_level: :warning)) =~ "[typesafe-sdk]"
   end
 
   test "while attached, a :debug client's call is logged with a redacted request line" do
-    assert :ok = attach()
+    assert :ok = attach([])
 
     log = logged(client(log_level: :debug, api_key: @secret))
 
+    assert log =~ ~r{\[debug\] \[typesafe-sdk\] #\d+ GET /v1/models -> }
     assert log =~ "[typesafe-sdk] #"
     assert log =~ " -> "
     assert log =~ "Bearer ***"
@@ -82,7 +83,7 @@ defmodule TypeSafe.DefaultLoggerTest do
   end
 
   test "after detach, an :info client's call is not logged" do
-    assert :ok = attach()
+    assert :ok = attach([])
     assert :ok = detach()
 
     refute logged(client(log_level: :info)) =~ "[typesafe-sdk]"
