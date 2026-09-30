@@ -39,8 +39,8 @@ An Elixir library does not own a log sink. The BEAM convention is `:telemetry` e
 ### Detail and redaction
 
 13. URL, headers, and bodies appear in metadata only when the client's `log_level` is `:debug`, and under no key at any other level (E6). At `:debug`, `:start` carries `url`, `headers`, and `body`, and `:stop` carries `body` for a response.
-14. `headers` has Req's shape: a map from lowercase name to a list of values. The SDK redacts it before `:telemetry.execute/3`, so no handler sees a credential, and the `%Req.Request{}` is never put in metadata.
-15. Redaction follows `logging.ts:53-79`. `authorization`, `proxy-authorization`, and `x-api-key` are matched case-insensitively and each value is masked: the scheme (the first whitespace-separated word, when the value contains a space) is kept, `***` replaces the secret, and the last four characters of the secret follow only when it is longer than eight characters. `cookie` and `set-cookie` become `***`. A credential header value that is not a binary becomes `***`. Every value of a multi-value header is masked.
+14. `headers` has Req's shape: a map from lowercase name to a list of values. The SDK redacts it before `:telemetry.execute/3`, so no handler sees the value of a credential header (decision 15), and the `%Req.Request{}` is never put in metadata. A header outside that list, such as a custom `default_headers` entry, is reported as given.
+15. Redaction follows `logging.ts:53-79`. `authorization`, `proxy-authorization`, and `x-api-key` are matched case-insensitively and each value is masked. When the value contains a space and its first whitespace-separated word is letters alone (`[A-Za-z]+`), that word is kept as the scheme, `***` replaces the secret, and the last four characters of the second word follow only when it is longer than eight characters. Otherwise the whole value is replaced by `***`, followed by the last four characters of the whole value when it is longer than eight characters. JS treats any first word as a scheme (`logging.ts:64-68`), so a key that contains a space after a dashed prefix would be logged in part. This is a deliberate deviation (typesafe-ai/typesafe-sdk-js#18). `cookie` and `set-cookie` become `***`. A credential header value that is not a binary becomes `***`. Every value of a multi-value header is masked.
 16. The last four characters of the API key therefore appear in the `:debug` request line and in `:debug` event metadata, as they do in JS. The raw key appears nowhere.
 17. `body` on `:start` is the JSON string the SDK sent, or `nil` for a `GET`. `TypeSafe.Telemetry` converts it from iodata, and the SDK's encoding of request bodies is unchanged (ADR 0003 decision 15). `:debug` therefore prints request bodies, which hold the caller's `state` and question text, and response bodies, unredacted. Only credential headers are masked.
 18. The URL has its `userinfo` removed before it is reported. JS logs the URL as configured.
@@ -49,7 +49,7 @@ An Elixir library does not own a log sink. The BEAM convention is `:telemetry` e
 
 19. The default logger writes each line through `Logger.log/2` with the prefix `[typesafe-sdk] ` and the JS text verbatim (E3), where `#N` is the request number, `METHOD` is upper case, and `path` is `/v1/models` or `/v1/systemone`:
     - `#N METHOD path -> url <inspect of %{headers:, body:}>` at `:debug`, before the attempt (`client.ts:368`).
-    - `#N METHOD path <- status in Nms`, with ` (request <id>)` when the response has a request id, at `:info` (`client.ts:390`).
+    - `#N METHOD path <- status in Nms`, with ` (request <id>)` when the response has a non-empty request id (JS omits the suffix for an empty one), at `:info` (`client.ts:390`).
     - `#N METHOD path <- body <inspect>` at `:debug` for a 2xx response, or `#N METHOD path <- error body <inspect>` for any other status, after the summary line (`client.ts:344,396`).
     - `#N METHOD path timed out after Nms` at `:info` (`client.ts:436`).
     - `#N METHOD path connection error after Nms <inspect of the error>` at `:info` (`client.ts:439`).
@@ -88,6 +88,7 @@ An Elixir library does not own a log sink. The BEAM convention is `:telemetry` e
 - A `:start` whose adapter raised something other than a pool timeout has no `:stop`.
 - An invalid `TYPESAFE_LOG_LEVEL` still falls back to `:warning` silently (ADR 0004 decision 11, E7). JS throws `Invalid log level ... from TYPESAFE_LOG_LEVEL` (`logging.ts:13-18`). A typo in the variable therefore turns logging off without a message.
 - The URL loses its `userinfo` (decision 18), which JS does not do.
+- A credential header whose first word is not letters alone is masked whole, where JS would keep that word (decision 15).
 - `:debug` prints bodies that can hold user data (decision 17).
 
 ## Alternatives considered

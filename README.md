@@ -288,9 +288,12 @@ Your application's `Logger` level has to allow `:info` or `:debug` too, or
 
 At `:debug` the log contains request bodies, which hold your `state` and question
 text, and response bodies, unredacted. Only credential headers are masked:
-`authorization`, `proxy-authorization`, and `x-api-key` keep their scheme and the
-last four characters of a secret longer than eight characters
-(`Bearer ***cdef`), and `cookie` and `set-cookie` become `***`. The last four
+`authorization`, `proxy-authorization`, and `x-api-key` keep a letters-only scheme
+and the last four characters of a secret longer than eight characters
+(`Bearer ***cdef`). A value that does not start with a letters-only word and a
+space is masked whole (`***cdef`), and `cookie` and `set-cookie` become `***`.
+A header with any other name, such as a custom `default_headers` entry, is
+printed as given, and the URL is printed without any `user:password@` part. The last four
 characters of your API key therefore appear in a `:debug` log. Use `:debug`
 only where logs are private.
 

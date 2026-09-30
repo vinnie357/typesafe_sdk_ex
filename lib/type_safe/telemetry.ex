@@ -64,7 +64,10 @@ defmodule TypeSafe.Telemetry do
 
   ## Redaction
 
-  Headers are redacted before the event is emitted, so no handler sees a credential.
+  Credential headers (`authorization`, `proxy-authorization`, `x-api-key`, `cookie`,
+  `set-cookie`) are redacted before the event is emitted, so no handler sees their
+  values. Any other header, such as a custom `default_headers` entry, is reported as
+  given.
   The `%Req.Request{}` is never put in metadata. See `redact_headers/1`.
   """
 
@@ -309,7 +312,7 @@ defmodule TypeSafe.Telemetry do
        when is_integer(status) and is_integer(duration) do
     request_id =
       case Map.get(metadata, :request_id) do
-        id when is_binary(id) -> " (request #{id})"
+        id when is_binary(id) and id != "" -> " (request #{id})"
         _no_request_id -> ""
       end
 
@@ -384,29 +387,25 @@ defmodule TypeSafe.Telemetry do
   defp mask(:key, value) when is_binary(value), do: redact_key(value)
   defp mask(_kind, _value), do: "***"
 
-  # JS logging.ts:53-58: keep the scheme and, for a secret longer than eight
-  # characters, its last four. `split(/\s+/, 2)` keeps the first two pieces.
+  # JS logging.ts:53-58, with one deviation (ADR 0013 decision 15): the first
+  # whitespace-separated word is a scheme only when it is letters alone. Any other
+  # value, such as a dashed key followed by a space, is masked whole, so no part of
+  # it is echoed as a "scheme". The secret keeps its last four characters only when
+  # it is longer than eight.
   defp redact_key(value) do
-    {scheme, secret} =
-      with true <- String.contains?(value, " "),
-           [scheme, secret | _rest] <- String.split(value, ~r/\s+/) do
-        {scheme, secret}
-      else
-        _no_scheme -> {"", value}
-      end
+    with true <- String.contains?(value, " "),
+         [scheme, secret | _rest] <- String.split(value, ~r/\s+/),
+         true <- Regex.match?(~r/^[A-Za-z]+$/, scheme) do
+      scheme <> " ***" <> tail(secret)
+    else
+      _no_scheme -> "***" <> tail(value)
+    end
+  end
 
-    tail =
-      case String.length(secret) > 8 do
-        true -> String.slice(secret, -4, 4)
-        false -> ""
-      end
-
-    scheme_prefix =
-      case scheme do
-        "" -> ""
-        scheme -> scheme <> " "
-      end
-
-    scheme_prefix <> "***" <> tail
+  defp tail(secret) do
+    case String.length(secret) > 8 do
+      true -> String.slice(secret, -4, 4)
+      false -> ""
+    end
   end
 end
