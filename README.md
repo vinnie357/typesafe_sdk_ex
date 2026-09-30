@@ -293,7 +293,9 @@ text, and response bodies, unredacted. Only credential headers are masked:
 of a secret longer than eight characters (`Bearer ***cdef`). Any other value that
 contains whitespace is masked as `***`, a value with no whitespace is masked as
 `***` plus its last four characters when it is longer than eight, and `cookie` and
-`set-cookie` become `***`.
+`set-cookie` become `***`. Whitespace here is Unicode whitespace plus U+FEFF, which
+is close to, not exactly, what JS treats as whitespace; a value split only by a
+zero-width space (U+200B) counts as having none.
 A header with any other name, such as a custom `default_headers` entry, is
 printed as given, and the URL is printed without any `user:password@` part. The last four
 characters of your API key therefore appear in a `:debug` log. Use `:debug`
