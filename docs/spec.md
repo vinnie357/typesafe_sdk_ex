@@ -107,7 +107,7 @@ Precedence is explicit option, then env, then default. JS treats only `undefined
 | `defaultModel` → `default_model` | env, then `jev-latest` | client. Per call through `request.model` (`client.ts:318`). | — |
 | `logLevel` → `log_level` | env, then `warn` | client | must be one of the levels, and the error names its source: `"loud" from TYPESAFE_LOG_LEVEL` or ``the `logLevel` option`` (`logging.ts:13-18`, `client.ts:157-162`, `client.test.ts:119-128`) |
 | `logger` → `logger` (§7) | Logger | client | — |
-| `retry` → `retry` (keyword) | §5 | client **and** per call. Merged field by field with the client policy (`client.ts:337`, `reliability.test.ts:383-400`). | a keyword list checked by `TypeSafe.RetryPolicy.merge/2`. An unknown key is named. `http_statuses` is a list, `Range`, or `MapSet` of integers from 100 to 999. Numeric fields are non-negative and `max_retries` is a non-negative integer. `nil` is rejected. Message form: `"retry.max_retries must be a non-negative integer, got -1"`. §5 |
+| `retry` → `retry` (keyword) | §5 | client **and** per call. Merged field by field with the client policy (`client.ts:337`, `reliability.test.ts:383-400`). | a keyword list checked by `TypeSafe.RetryPolicy.merge/2`. An unknown key is named. `http_statuses` is a list, `Range`, or `MapSet` of integers from 100 to 999. `max_retries`, `backoff_initial_ms`, `backoff_max_ms`, and `max_retry_after_ms` are non-negative integers (ms fields: deliberate deviation from JS, §5); `backoff_jitter` is a number from 0 to 1. `nil` is rejected. Message form: `"retry.max_retries must be a non-negative integer, got -1"`. §5 |
 | `timeout` → `timeout` (ms) | `10_000` (`retry.ts:5`) | client **and** per call (`client.ts:335-336`) | positive **integer**. Floats and `nil` are rejected, with no env fallback. JS accepts any positive finite number (`client.ts:77-84`); the port restricts to integers (deviation; unverified whether `receive_timeout` accepts a float). `reliability.test.ts:524-534` |
 | `defaultHeaders` → `default_headers` | `%{}` | client. Per call: `headers` (`types.ts:205`). | — |
 | `fetch` → `req_options` (keyword merged into `Req.new/1`; tests pass `adapter: TypeSafe.StubAdapter`, see §11) | `[]` | client | — |
@@ -133,14 +133,16 @@ Per-call validation errors (bad `timeout` or `retry`) come back before any reque
 | Field (Elixir) | Default | Validation (`client.ts:111-147`) |
 |---|---|---|
 | `max_retries` | 2 | non-negative integer (`client.ts:70-75`) |
-| `backoff_initial_ms` | 500 | non-negative number |
-| `backoff_max_ms` | 5000 | non-negative |
+| `backoff_initial_ms` | 500 | non-negative integer (ms). Deliberate deviation from JS, see below. |
+| `backoff_max_ms` | 5000 | non-negative integer (ms). Deliberate deviation from JS, see below. |
 | `backoff_jitter` | 0.25 | between 0 and 1 inclusive |
 | `http_statuses` | `MapSet` of 408, 429, 500..599 | integers from 100 to 999 (`client.ts:102-109`) |
 | `respect_retry_after` | true | boolean |
-| `max_retry_after_ms` | 60_000 | non-negative, finite |
+| `max_retry_after_ms` | 60_000 | non-negative integer (ms). Deliberate deviation from JS, see below. |
 | `api_connection_error` | true | boolean |
 | `api_timeout_error` | **false** (JS: true, `retry.ts:22`) | boolean. **Deliberate deviation from JS (operator decision 2026-09-29, §12 q20):** timeout retries are opt-in, for every call, not only POST. A timed-out `POST /v1/systemone` may already have run and billed, and the API has no idempotency key (`client.ts:321-400`, `api.md:L338`). |
+
+**Integer millisecond fields (deliberate deviation from JS, S3b).** JS accepts fractional, finite numbers for `backoffInitialMs`, `backoffMaxMs`, and `maxRetryAfterMs` (`types.ts` `RetryPolicy`). The port requires non-negative integers. Reason: `delay_ms/4` computes in exact integer arithmetic. The doubling stops at the cap, so no attempt number can raise. Jitter multiplies by the exact rational from `Float.ratio/1` and rounds half away from zero, so a huge policy value cannot overflow a float. `http_statuses` given as a `Range` is bounds-checked (both ends within 100..999) before it is expanded to a `MapSet`, so a huge range cannot hang validation.
 
 Every other default matches JS, so 408, 429, 5xx, and connection errors still retry by default. Delays are non-negative integers: JS returns fractional milliseconds, but Req accepts only an integer `{:delay, _}` (`req@0.7.4 lib/req/steps.ex:1803`). `delay_ms` rounds with `round/1` (half away from zero) and `parse_retry_after` rounds half up in exact integer arithmetic; the two are identical for non-negative values.
 

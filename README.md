@@ -108,6 +108,9 @@ The fields are `max_retries`, `backoff_initial_ms`, `backoff_max_ms`,
 `backoff_jitter`, `http_statuses` (a list, `Range`, or `MapSet` of statuses
 from 100 to 999), `respect_retry_after`, `max_retry_after_ms`,
 `api_connection_error`, and `api_timeout_error`; see `TypeSafe.RetryPolicy`.
+`max_retries` and the three millisecond fields (`backoff_initial_ms`,
+`backoff_max_ms`, `max_retry_after_ms`) must be non-negative integers, and
+`backoff_jitter` a number from 0 to 1.
 An invalid value, an unknown key, or `retry: nil` returns
 `{:error, %TypeSafe.Error{}}` naming `retry.<field>`, before any request is
 sent.
