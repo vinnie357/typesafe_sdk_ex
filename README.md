@@ -26,9 +26,9 @@ response["answers"]["category"]["choice"]
 `log_level:` options, each falling back to its `TYPESAFE_*` environment
 variable. `base_url`, `default_model`, and `log_level` then fall back to a
 default; `api_key` has none, and `new/1` returns an error without one. The
-client stores `log_level`, but nothing logs yet (see [Known
-limitations](#known-limitations)). The `@doc` on `TypeSafe.new/1` lists every
-option.
+`log_level` sets which lines the default logger prints for that client (see
+[Logging and telemetry](#logging-and-telemetry)). The `@doc` on `TypeSafe.new/1`
+lists every option.
 
 Question helpers `TypeSafe.noul/0,1,2`, `TypeSafe.choice/2`, and
 `TypeSafe.score/2` build the typed questions passed to `system_one/3`.
@@ -261,13 +261,58 @@ A `finch: [name: MyApp.Finch]` that names a pool you did not start raises
 `ArgumentError` on the first call. That is a programming error, like sending a
 message to a process that is not running.
 
+## Logging and telemetry
+
+The SDK emits `:telemetry` events for every HTTP attempt. It prints nothing until
+you attach the default logger, once, at application startup:
+
+```elixir
+TypeSafe.attach_default_logger()
+```
+
+The default logger prints the JS SDK's log lines through `Logger`, prefixed
+`[typesafe-sdk] `. Which lines print depends on the client's `log_level:` option
+or `TYPESAFE_LOG_LEVEL`, per client:
+
+- `:warning` (the default), `:error`, and `:off` print nothing.
+- `:info` prints one line per attempt, for example
+  `#1 GET /v1/models <- 200 in 120ms (request req_9)`, and one per retry,
+  for example `#1 GET /v1/models retrying in 500ms (retry 1/2) after 503`.
+  A transport failure prints `timed out after` or `connection error after`.
+- `:debug` adds the request line, with the URL, the headers, and the body sent,
+  and the response body.
+
+Your application's `Logger` level has to allow `:info` or `:debug` too, or
+`Logger` drops the lines. An unrecognized `TYPESAFE_LOG_LEVEL` falls back to
+`:warning` without an error.
+
+At `:debug` the log contains request bodies, which hold your `state` and question
+text, and response bodies, unredacted. Only credential headers are masked:
+`authorization`, `proxy-authorization`, and `x-api-key` keep their scheme and the
+last four characters of a secret longer than eight characters
+(`Bearer ***cdef`), and `cookie` and `set-cookie` become `***`. The last four
+characters of your API key therefore appear in a `:debug` log. Use `:debug`
+only where logs are private.
+
+`TypeSafe.detach_default_logger/0` removes it. To send the events somewhere else,
+attach your own handler with `:telemetry.attach_many/4`. Every event's metadata
+carries `request_number`, `method`, `path`, `attempt` (0 for the first attempt),
+and the client's `log_level`:
+
+| Event | Measurements | Extra metadata |
+|---|---|---|
+| `[:typesafe, :attempt, :start]` | `monotonic_time`, `system_time` | At `:debug` only: `url`, `headers` (redacted), `body` |
+| `[:typesafe, :attempt, :stop]` | `duration`, `monotonic_time` (native units) | `status`, `request_id`, `error` (`nil`, or a `TypeSafe.Error.Timeout` or `TypeSafe.Error.Connection`); at `:debug` only, `body` |
+| `[:typesafe, :request, :retry]` | `delay_ms` | `retry`, `max_retries`, `reason` |
+
+The events fire whatever the `log_level`. `TypeSafe.Telemetry` documents every
+field.
+
+A handler that raises is detached by `:telemetry` for the rest of the VM, so
+keep handlers total. The call that fired it still returns its normal result.
+
 ## Known limitations
 
-- **No logging.** `log_level:` and `TYPESAFE_LOG_LEVEL` are accepted and stored
-  on the client, and nothing reads them yet
-  ([#13](https://github.com/vinnie357/typesafe_sdk_ex/issues/13)).
-- **No telemetry.** The SDK emits no events of its own
-  ([#13](https://github.com/vinnie357/typesafe_sdk_ex/issues/13)).
 - **No supervised client and no shared rate-limit cooldown.** `TypeSafe.new/1`
   returns a plain struct, and the SDK starts no process of its own. Each client
   backs off on its own

@@ -41,6 +41,7 @@ defmodule TypeSafe.MixProject do
   defp deps do
     [
       {:req, "~> 0.7.4"},
+      {:telemetry, "~> 1.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end

@@ -309,20 +309,33 @@ defmodule TypeSafe.HTTP do
   # A Finch pool that cannot hand out a connection in time raises instead of
   # returning an error; that one raise becomes `{:error, :pool_timeout}` here,
   # outside Req's retry loop, so it is never retried (ADR 0006 decision 15).
+  #
+  # The pool-timeout raise skips the retry step, so the attempt's telemetry stop
+  # is emitted here (ADR 0013).
   defp send_request(client, call_headers, request_options) do
-    client
-    |> build_request(call_headers)
-    |> Req.request(
-      request_options ++
-        [
-          retry: &TypeSafe.Retry.decide/2,
-          max_retries: client.retry.max_retries,
-          retry_log_level: false,
-          receive_timeout: client.timeout
-        ]
-    )
-  rescue
-    exception in RuntimeError -> pool_timeout_or_reraise(exception, __STACKTRACE__)
+    telemetry =
+      TypeSafe.Telemetry.new_call(
+        client,
+        Keyword.get(request_options, :method),
+        Keyword.get(request_options, :url)
+      )
+
+    request = build_request(client, call_headers, telemetry)
+
+    try do
+      Req.request(
+        request,
+        request_options ++
+          [
+            retry: &TypeSafe.Retry.decide/2,
+            max_retries: client.retry.max_retries,
+            retry_log_level: false,
+            receive_timeout: client.timeout
+          ]
+      )
+    rescue
+      exception in RuntimeError -> pool_timeout_or_reraise(exception, telemetry, __STACKTRACE__)
+    end
   end
 
   # restraint: Finch (0.24.0, http1/pool.ex) offers no exception type for this,
@@ -331,12 +344,19 @@ defmodule TypeSafe.HTTP do
   # loudly on that. Any other RuntimeError is re-raised untouched.
   @pool_exhausted_prefix "Finch was unable to provide a connection within the timeout"
 
-  defp pool_timeout_or_reraise(%RuntimeError{message: @pool_exhausted_prefix <> _rest}, _stack),
-    do: {:error, :pool_timeout}
+  defp pool_timeout_or_reraise(
+         %RuntimeError{message: @pool_exhausted_prefix <> _rest},
+         telemetry,
+         _stack
+       ) do
+    TypeSafe.Telemetry.pool_timeout(telemetry)
+    {:error, :pool_timeout}
+  end
 
-  defp pool_timeout_or_reraise(exception, stacktrace), do: reraise(exception, stacktrace)
+  defp pool_timeout_or_reraise(exception, _telemetry, stacktrace),
+    do: reraise(exception, stacktrace)
 
-  defp build_request(client, call_headers) do
+  defp build_request(client, call_headers, telemetry) do
     auth = auth_header(client)
 
     client.req
@@ -344,7 +364,11 @@ defmodule TypeSafe.HTTP do
     |> merge_headers(call_headers)
     |> apply_protected_headers(auth)
     |> Req.Request.put_private(:typesafe_retry_policy, client.retry)
-    |> Req.Request.append_request_steps(typesafe_retry_count: &put_retry_count/1)
+    |> Req.Request.put_private(:typesafe_telemetry, telemetry)
+    |> Req.Request.append_request_steps(
+      typesafe_retry_count: &put_retry_count/1,
+      typesafe_telemetry: &TypeSafe.Telemetry.start/1
+    )
   end
 
   # Runs on every attempt, because Req re-runs the request steps on each retry.

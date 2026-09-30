@@ -80,20 +80,30 @@ defmodule TypeSafe.Retry do
   when `http_statuses` lists it. A `%Req.TransportError{reason: :timeout}`
   follows `api_timeout_error`; any other exception follows
   `api_connection_error`.
+
+  Every call also reports the attempt's end to `TypeSafe.Telemetry` (a `:stop`
+  event, then a `:retry` event when a delay is scheduled) without changing the
+  result; a request with no telemetry state in its private data emits nothing.
   """
   @spec decide(Req.Request.t(), Req.Response.t() | Exception.t()) ::
           {:delay, non_neg_integer()} | false
-  def decide(_request, %Req.Response{status: status}) when status in 200..299, do: false
+  def decide(request, response_or_exception) do
+    decision = decision(request, response_or_exception)
+    TypeSafe.Telemetry.attempt_finished(request, response_or_exception, decision)
+    decision
+  end
 
-  def decide(request, %Req.Response{status: status, headers: headers}) do
+  defp decision(_request, %Req.Response{status: status}) when status in 200..299, do: false
+
+  defp decision(request, %Req.Response{status: status, headers: headers}) do
     schedule(request, headers, &MapSet.member?(&1.http_statuses, status))
   end
 
-  def decide(request, %Req.TransportError{reason: :timeout}) do
+  defp decision(request, %Req.TransportError{reason: :timeout}) do
     schedule(request, nil, & &1.api_timeout_error)
   end
 
-  def decide(request, _exception), do: schedule(request, nil, & &1.api_connection_error)
+  defp decision(request, _exception), do: schedule(request, nil, & &1.api_connection_error)
 
   defp schedule(request, headers, retryable?) do
     policy = Req.Request.get_private(request, :typesafe_retry_policy)

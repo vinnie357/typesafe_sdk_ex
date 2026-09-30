@@ -1,7 +1,7 @@
 # ADR 0004: Configuration resolution and option validation
 
 **Status:** Accepted
-**Date:** 2026-09-17; amended 2026-09-30 (issue #12)
+**Date:** 2026-09-17; amended 2026-09-30 (issue #12); amended 2026-09-30 (logging, issue #13)
 
 ## Context
 
@@ -20,7 +20,7 @@ The JS constructor resolves four settings from an explicit option, then an envir
 9. The `log_level` option takes one of `:debug`, `:info`, `:warning`, `:error`, `:off`. Any other value returns `{:error, _}`.
 10. `TYPESAFE_LOG_LEVEL` accepts `debug`, `info`, `warn`, `warning`, `error`, and `off`, in any letter case. `warn` and `warning` both map to `:warning`.
 11. An unrecognized `TYPESAFE_LOG_LEVEL` falls back to `:warning` without an error.
-12. `log_level` has no effect today: the SDK does not log.
+12. `log_level` selects the default logger's lines through event metadata: every `:telemetry` event carries the client's resolved level, and the default logger keeps a line only when its level ranks at or above it (ADR 0013). The level does not stop events from firing.
 13. `new/1` checks option keys with `Keyword.validate/2` and returns `{:error, _}` naming unknown keys. A key given twice is caught first (decision 16).
 14. `new/1` checks option values with guard clauses and returns `{:error, %TypeSafe.Error{}}` that names the option. A non-keyword `opts` returns `{:error, _}` too.
 15. Trimming strips U+FEFF (the byte order mark) as well as whitespace, for the `api_key` option and for every environment value. `String.trim/1` strips Unicode White_Space only, and U+FEFF is not in that set, while JS `trim` strips it (ECMAScript `WhiteSpace` includes U+FEFF). A BOM-only `api_key` option is rejected with the missing-key error even when `TYPESAFE_API_KEY` is set. A BOM-only environment value counts as unset. A BOM around real text is removed: `"\u{FEFF}k\u{FEFF}"` becomes `"k"`. Without this the SDK sent `Bearer \u{FEFF}` and the server saw an invalid key. Other trimming is unchanged: `"  sk-1 \n"` still becomes `"sk-1"`. One deviation remains: `String.trim/1` also strips U+0085 (next line), which JS `trim` keeps (verified on Node 24.19.0: `"\u0085x\u0085".trim().length` is 3), and the port keeps the Elixir behavior. Only the `api_key` option is trimmed among the options; `base_url` and `default_model` options are used as given.
@@ -36,7 +36,7 @@ The JS constructor resolves four settings from an explicit option, then an envir
 
 ### Negative
 
-- Decisions 7 and 11 deviate from JS. JS keeps an explicit `""` and sends `Bearer `. JS throws `Invalid log level "loud" from TYPESAFE_LOG_LEVEL` and names the source (`logging.ts:13-18`, `client.ts:157-162`, `test/client.test.ts:119-128`). The port cannot validate the environment level yet, because nothing reads it. When logging is built, decision 11 needs a new ADR.
+- Decisions 7 and 11 deviate from JS. JS keeps an explicit `""` and sends `Bearer `. JS throws `Invalid log level "loud" from TYPESAFE_LOG_LEVEL` and names the source (`logging.ts:13-18`, `client.ts:157-162`, `test/client.test.ts:119-128`). Logging now exists and decision 11 stands unchanged (ADR 0013, operator decision E7): an invalid `TYPESAFE_LOG_LEVEL` still falls back to `:warning` without a message, so a typo in the variable turns the default logger off silently.
 - The Python SDK documents that an explicitly empty key does not fall back to the environment (https://docs.typesafe.ai/sdk/python/usage.md, "Environment variables"). Decision 7 matches it: a blank `api_key` option is rejected even when the variable is set.
 - The `log_level` option accepts atoms only. `log_level: "warn"` returns `{:error, _}`.
 - Decision 16 has no JS counterpart: a JS options object cannot hold a key twice.

@@ -10,8 +10,8 @@ Each ADR documents behavior the code has today. Where a decision has a known gap
 
 | ADR | Title | Status | Date |
 |---|---|---|---|
-| [0001](0001-port-js-sdk-as-reference.md) | Port the JS SDK v0.6.0 as the behavioral reference | Accepted | 2026-09-17; re-verified 2026-09-29 |
-| [0002](0002-runtime-dependency-is-req-only.md) | Runtime dependency is Req only | Accepted | 2026-09-17; amended 2026-09-30 |
+| [0001](0001-port-js-sdk-as-reference.md) | Port the JS SDK v0.6.0 as the behavioral reference | Accepted | 2026-09-17; re-verified 2026-09-29; amended 2026-09-30 |
+| [0002](0002-runtime-dependency-is-req-only.md) | Runtime dependency is Req only (Req and `telemetry` since 2026-09-30) | Accepted | 2026-09-17; amended 2026-09-30 |
 | [0003](0003-public-api-facade-and-tagged-tuples.md) | Public API is a facade returning tagged tuples | Accepted | 2026-09-17; amended 2026-09-30 |
 | [0004](0004-configuration-resolution-and-option-validation.md) | Configuration resolution and option validation | Accepted | 2026-09-17; amended 2026-09-30 |
 | [0005](0005-sdk-owned-request-settings-headers-and-body-decoding.md) | SDK-owned request settings, headers, and body decoding | Accepted | 2026-09-17; amended 2026-09-30 |
@@ -22,6 +22,7 @@ Each ADR documents behavior the code has today. Where a decision has a known gap
 | [0010](0010-per-attempt-timeout-on-req-receive-timeout.md) | Per-attempt timeout on Req `receive_timeout` | Accepted | 2026-09-17; amended 2026-09-29 |
 | [0011](0011-question-builders-and-pre-send-validation.md) | Question builders and pre-send request validation | Accepted | 2026-09-17 |
 | [0012](0012-test-seams-without-mocking-libraries.md) | Test seams without mocking libraries | Accepted | 2026-09-17; amended 2026-09-30 |
+| [0013](0013-telemetry-events-and-default-logger.md) | Telemetry events and an opt-in default logger | Accepted | 2026-09-30 |
 
 ## Citation conventions
 
@@ -30,7 +31,7 @@ Each ADR documents behavior the code has today. Where a decision has a known gap
 - `<page>.md:Lnn` is a line in the raw Markdown of `https://docs.typesafe.ai/<page>.md`, re-checked on 2026-09-29. Those pages change: many line numbers in the pre-split spec no longer matched, so an ADR cites a page by URL and section or field name wherever a line number did not re-verify.
 - "Observed" marks a behavior seen by running it on Req 0.7.4, Finch 0.24.0, Mint 1.11.0, and Elixir 1.19.5 with OTP 28. The probe scripts are not committed.
 - PR review findings are cited as `PR #<n> review <round>, finding <label>` with the comment URL. The label (`B` for blocking, `N` for non-blocking, `R` and `D` for later rounds) has no meaning outside that comment.
-- Unbuilt material (logging, telemetry, and the live-API test plan) is not an ADR. It stays in the [last full spec](https://github.com/vinnie357/typesafe_sdk_ex/blob/e83f7a28c126f6f9ead2fb14bf8edcd3a9efd4c4/docs/spec.md), which no ADR endorses.
+- Unbuilt material (the live-API test plan) is not an ADR. It stays in the [last full spec](https://github.com/vinnie357/typesafe_sdk_ex/blob/e83f7a28c126f6f9ead2fb14bf8edcd3a9efd4c4/docs/spec.md), which no ADR endorses.
 
 ## Legacy references
 
