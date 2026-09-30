@@ -20,13 +20,23 @@ defmodule TypeSafe.Errors do
 
   @doc """
   Builds `TypeSafe.Error.Timeout` for a `:timeout` transport failure, or
-  `TypeSafe.Error.Connection` for any other transport failure.
+  `TypeSafe.Error.Connection` for any other transport failure, including the
+  `:pool_timeout` marker `TypeSafe.HTTP` returns when Finch's pool is exhausted.
   """
-  @spec from_transport_error(Exception.t(), pos_integer()) :: Exception.t()
+  @spec from_transport_error(Exception.t() | :pool_timeout, pos_integer()) :: Exception.t()
   def from_transport_error(%Req.TransportError{reason: :timeout}, timeout_ms) do
     %TypeSafe.Error.Timeout{
       message: "Request timed out after #{timeout_ms}ms.",
       timeout_ms: timeout_ms
+    }
+  end
+
+  def from_transport_error(:pool_timeout, _timeout_ms) do
+    %TypeSafe.Error.Connection{
+      message:
+        "Connection error: connection pool exhausted " <>
+          "(no connection available within the pool timeout)",
+      reason: :pool_timeout
     }
   end
 
@@ -134,11 +144,21 @@ defmodule TypeSafe.Errors do
 
   defp describe_validation_error(_entry), do: []
 
+  # Mirrors `loc.filter((x) => x !== "body").join(".")` (errors.ts:31, ADR 0006
+  # decision 14): "body" is dropped at the top level only, and each element
+  # renders as JS `Array#join` does, so no JSON value raises.
   defp loc_string(loc) when is_list(loc) do
     loc
     |> Enum.reject(&(&1 == "body"))
-    |> Enum.map_join(".", &to_string/1)
+    |> js_join(".")
   end
 
   defp loc_string(_loc), do: ""
+
+  defp js_join(list, separator), do: Enum.map_join(list, separator, &js_string/1)
+
+  defp js_string(nil), do: ""
+  defp js_string(object) when is_map(object), do: "[object Object]"
+  defp js_string(list) when is_list(list), do: js_join(list, ",")
+  defp js_string(scalar), do: to_string(scalar)
 end
