@@ -397,6 +397,23 @@ defmodule TypeSafe.TelemetryTest do
     refute inspect(events, limit: :infinity, printable_limit: :infinity) =~ "SUPERSECRETVALUE"
   end
 
+  # Red on 9b9a5d4: the letters-only word was logged as a "scheme".
+  test "at :debug a letters-only default header value outside the allowlist is fully masked" do
+    client =
+      client(StubAdapter.respond(200, @ok_body),
+        log_level: :debug,
+        default_headers: %{"x-api-key" => "LETTERSONLYSECRETKEY x"}
+      )
+
+    assert {:ok, []} = list_models(client)
+
+    events = events()
+    all_lines = texts(events)
+    refute all_lines == []
+    refute Enum.any?(all_lines, &String.contains?(&1, "LETTERSONLYSECRETKEY"))
+    refute inspect(events, limit: :infinity, printable_limit: :infinity) =~ "LETTERSONLYSECRETKEY"
+  end
+
   test "at :debug credentials in the base_url never reach the url metadata or the lines" do
     client =
       client(StubAdapter.respond(200, @ok_body),
@@ -615,15 +632,16 @@ defmodule TypeSafe.TelemetryTest do
       assert redact(%{"authorization" => ["Bearer   #{@secret}"]}) ==
                %{"authorization" => ["Bearer ***cdef"]}
 
+      # "Scheme" is not an allowlisted scheme, so the 22-character value is masked whole.
       assert redact(%{"authorization" => ["Scheme abcd efghijklmn"]}) ==
-               %{"authorization" => ["Scheme ***"]}
+               %{"authorization" => ["***klmn"]}
 
       assert redact(%{"authorization" => ["Bearer "]}) == %{"authorization" => ["Bearer ***"]}
     end
 
-    # The first word is a scheme only when it is letters alone; otherwise the whole
-    # value is the secret, masked as "***" plus the last four characters when the
-    # whole value is longer than eight.
+    # The first word is a scheme only when it is one of bearer, basic, token, digest
+    # or negotiate (case-insensitive); otherwise the whole value is the secret, masked
+    # as "***" plus the last four characters when the whole value is longer than eight.
     test "a dashed first word is not a scheme: x-api-key is masked whole" do
       assert redact(%{"x-api-key" => ["sk-live-SUPERSECRETVALUE9 x"]}) ==
                %{"x-api-key" => ["***E9 x"]}
@@ -649,9 +667,56 @@ defmodule TypeSafe.TelemetryTest do
                %{"authorization" => ["***cret"]}
     end
 
-    test "a letters-only scheme is kept" do
+    test "a known scheme is kept" do
       assert redact(%{"authorization" => ["Token abcdefghijkl"]}) ==
                %{"authorization" => ["Token ***ijkl"]}
+    end
+
+    # Control (green on 9b9a5d4): the five allowlisted schemes keep their word as given.
+    test "each allowlisted scheme is kept, in any case" do
+      assert redact(%{
+               "authorization" => ["Bearer abcdefghijkl"],
+               "proxy-authorization" => ["basic abcdefghijkl"],
+               "x-api-key" => ["TOKEN abcdefghijkl"]
+             }) == %{
+               "authorization" => ["Bearer ***ijkl"],
+               "proxy-authorization" => ["basic ***ijkl"],
+               "x-api-key" => ["TOKEN ***ijkl"]
+             }
+
+      assert redact(%{"authorization" => ["Digest abcdefghijkl"]}) ==
+               %{"authorization" => ["Digest ***ijkl"]}
+
+      assert redact(%{"authorization" => ["Negotiate abcdefghijkl"]}) ==
+               %{"authorization" => ["Negotiate ***ijkl"]}
+    end
+
+    # Red on 9b9a5d4: a letters-only first word outside the allowlist was echoed.
+    test "a letters-only first word outside the allowlist is masked whole" do
+      assert redact(%{"x-api-key" => ["LETTERSONLYSECRETKEY x"]}) ==
+               %{"x-api-key" => ["***EY x"]}
+
+      assert redact(%{"proxy-authorization" => ["PROXYLETTERSONLY "]}) ==
+               %{"proxy-authorization" => ["***NLY "]}
+    end
+
+    # Red on 9b9a5d4: the old code only looked for a space, so a tab or newline hid the
+    # secret word behind a "scheme".
+    test "a tab or newline in the value does not make a letters-only word a scheme" do
+      assert redact(%{"authorization" => ["TABLETTERSECRET\tsk x"]}) ==
+               %{"authorization" => ["***sk x"]}
+
+      assert redact(%{"authorization" => ["LETTERSNLSECRET\nx y"]}) ==
+               %{"authorization" => ["***\nx y"]}
+    end
+
+    # Red on 9b9a5d4: a near-miss of an allowlisted word is not a scheme.
+    test "a near-miss scheme word is masked whole" do
+      assert redact(%{"authorization" => ["Bearerx abcdefghijkl"]}) ==
+               %{"authorization" => ["***ijkl"]}
+
+      assert redact(%{"authorization" => ["Tokens abcdefghijkl"]}) ==
+               %{"authorization" => ["***ijkl"]}
     end
 
     test "every value of a multi-value header is redacted" do
