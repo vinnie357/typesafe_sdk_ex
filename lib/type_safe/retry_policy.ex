@@ -77,8 +77,11 @@ defmodule TypeSafe.RetryPolicy do
 
   defp check_keyword(overrides) do
     case Keyword.keyword?(overrides) do
-      true -> :ok
-      false -> error("retry must be a keyword list, got #{inspect(overrides)}")
+      true ->
+        :ok
+
+      false ->
+        error("retry must be a keyword list, got #{inspect(overrides, charlists: :as_lists)}")
     end
   end
 
@@ -106,7 +109,10 @@ defmodule TypeSafe.RetryPolicy do
           {:cont, {:ok, [{field, normalized} | acc]}}
 
         :error ->
-          {:halt, error("retry.#{field} must be #{expected(field)}, got #{inspect(value)}")}
+          {:halt,
+           error(
+             "retry.#{field} must be #{expected(field)}, got #{inspect(value, charlists: :as_lists)}"
+           )}
       end
     end)
   end
