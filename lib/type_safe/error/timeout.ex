@@ -1,7 +1,7 @@
 defmodule TypeSafe.Error.Timeout do
   @moduledoc """
-  A request attempt hit the timeout while connecting or waiting for a response. A kind of
-  transport failure, kept as its own struct rather than a
+  A request attempt timed out, either while connecting or while waiting for a
+  response. A kind of transport failure, kept as its own struct rather than a
   `TypeSafe.Error.Connection` subtype because Elixir has no inheritance.
 
   The timeout bounds each socket read, not connecting, and a per-call
