@@ -1,7 +1,7 @@
 # ADR 0012: Test seams without mocking libraries
 
 **Status:** Accepted
-**Date:** 2026-09-17; amended 2026-09-29 (the real-socket test); amended 2026-09-30 (`config :req, :default_options` test module); amended 2026-09-30 (telemetry test seams, issue #13)
+**Date:** 2026-09-17; amended 2026-09-29 (the real-socket test); amended 2026-09-30 (`config :req, :default_options` test module); amended 2026-09-30 (telemetry test seams, issue #13); amended 2026-09-30 (`async: false` ratified, issue #13)
 
 ## Context
 
@@ -22,7 +22,7 @@ The JS suite injects a `mockFetch` and fake timers (`test/helpers.ts:10-21`, `te
 11. One test uses a real socket: a loopback `:gen_tcp` server holds its first response until the test releases it, which the test does once the second call is on the wire, so no wall-clock delay decides the outcome (issue #15). The first call has a short client timeout and times out. The second call on the same client, made with a longer timeout, must return `{:ok, _}` or a clean `{:error, %TypeSafe.Error.*{}}` and never raise. The server is a long-lived acceptor process that owns the listener, binds port 0, and closes the listener in `on_exit`.
 12. No test calls the live API, and `mise run ci` needs no API key.
 13. Tests observe `:telemetry` events through `TypeSafe.TelemetryForwarder` (`test/support/telemetry_forwarder.ex`). It attaches a handler under a unique id and forwards an event to the test process only when the handler runs in that process, or in a process that lists it in `$callers` (`Task.async/1` does). A handler attached by one test is inert for every other test's processes, so telemetry tests stay `async: true`. Each test detaches its handler in `on_exit`.
-14. `test/typesafe/default_logger_test.exs` is `async: false`, for two pieces of state no test can isolate: the handler id `"typesafe-default-logger"` is VM-global, and the global `Logger` level is `:none` in `config/test.exs`, so `capture_log/2` sees nothing until the test raises it. The module restores both in `on_exit`.
+14. `test/typesafe/default_logger_test.exs` is `async: false`, for two pieces of state no test can isolate: the handler id `"typesafe-default-logger"` is VM-global, and the global `Logger` level is `:none` in `config/test.exs`, so `capture_log/2` sees nothing until the test raises it. The module restores both in `on_exit`. The operator ratified this `async: false` exception on 2026-09-30 (https://github.com/vinnie357/typesafe_sdk_ex/issues/13#issuecomment-5919115403).
 15. `TypeSafe.Telemetry.log_lines/3` and `redact_headers/1` are pure: a test passes an event, its measurements, and its metadata and gets the lines, with no `Logger` and no handler involved.
 
 ## Consequences

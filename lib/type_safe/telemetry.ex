@@ -75,9 +75,11 @@ defmodule TypeSafe.Telemetry do
   `"Bearer ***ijkl"`); a third or later word is dropped. Any other value that
   contains whitespace, including a leading space, becomes `"***"`. A value with no
   whitespace becomes `"***"` plus its last four graphemes when it is longer than
-  eight. A value that a zero-width space (U+200B) alone separates counts as having
-  no whitespace. Any other header, such as a custom `default_headers` entry, is
-  reported as given.
+  eight. Only whitespace splits a value. A code point that is not whitespace does
+  not, so a value separated only by one keeps a tail of at most four graphemes.
+  Examples: U+200B (zero-width space), U+200C, U+200D, U+2060, the bidi controls
+  U+200E and U+202E, and the filler U+3164. Any other header, such as a custom
+  `default_headers` entry, is reported as given.
   The `%Req.Request{}` is never put in metadata. See `redact_headers/1`.
   """
 
@@ -398,7 +400,7 @@ defmodule TypeSafe.Telemetry do
   defp mask(:key, value) when is_binary(value), do: redact_key(value)
   defp mask(_kind, _value), do: "***"
 
-  # JS logging.ts:53-58, with one deviation (ADR 0013 decision 15): the first
+  # JS logging.ts:53-58, with deviations (ADR 0013 decision 15): the first
   # whitespace-separated word is a scheme only when it is one of @schemes, compared
   # without regard to case. A value with whitespace and any other first word is
   # masked whole as "***", with no tail, so no part of it is echoed. The secret

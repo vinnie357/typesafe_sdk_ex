@@ -1,7 +1,7 @@
 # ADR 0001: Port the JS SDK v0.6.0 as the behavioral reference
 
 **Status:** Accepted
-**Date:** 2026-09-17; upstream re-verified 2026-09-29; amended 2026-09-30 (logging, issue #13)
+**Date:** 2026-09-17; upstream re-verified 2026-09-29; amended 2026-09-30 (logging, issue #13); amended 2026-09-30 (redaction allowlist and whitespace, issue #22)
 
 ## Context
 
@@ -45,7 +45,7 @@ On 2026-09-29 the JS repository was identical to the pinned commit: the GitHub c
 | An explicit blank `api_key` is rejected even when the env key is set; JS sends `Bearer ` | ADR 0004 |
 | An unrecognized `TYPESAFE_LOG_LEVEL` falls back to `:warning`; JS throws | ADR 0004 |
 | The `log_level` option takes atoms only; JS takes the strings | ADR 0004 |
-| Logging is `:telemetry` events plus an opt-in default logger. Request numbers are VM-wide, header names are lowercase in Req's list shape, the request body is the JSON string, debug detail uses `inspect/1`, the URL loses its userinfo, a credential header value is split into scheme and secret only when its first word is Bearer, Basic, Token, Digest or Negotiate, any other value with whitespace is masked as `***`, and whitespace is Unicode `\s` plus U+FEFF, close to JS but not identical (typesafe-ai/typesafe-sdk-js#18), and there are no abort lines | ADR 0013 |
+| Logging is `:telemetry` events plus an opt-in default logger. Request numbers are VM-wide, header names are lowercase in Req's list shape, the request body is the JSON string, debug detail uses `inspect/1`, the URL loses its userinfo, a credential header value is split into scheme and secret only when its first word is Bearer, Basic, Token, Digest or Negotiate, any other value with whitespace is masked as `***`, and whitespace is Unicode `\s` plus U+FEFF on valid UTF-8 and ASCII `\s` otherwise, close to JS but not identical (typesafe-ai/typesafe-sdk-js#18), and there are no abort lines | ADR 0013 |
 | `User-Agent`, `X-TypeSafe-SDK`, and `X-TypeSafe-Runtime` carry Elixir values | ADR 0005 |
 | `req_options` cannot override SDK-owned settings; the header surface is a one-value map | ADR 0005 |
 | Raw-body error messages use the original body text; the `Timeout` struct is separate from `Connection` | ADR 0006 |

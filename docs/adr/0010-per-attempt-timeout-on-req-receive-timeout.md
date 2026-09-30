@@ -1,7 +1,7 @@
 # ADR 0010: Per-attempt timeout on Req `receive_timeout`
 
 **Status:** Accepted
-**Date:** 2026-09-17 (a fixed 10 s timeout reaches Req); 2026-09-29 (the `timeout:` option, its bound, and the connect and trickle semantics)
+**Date:** 2026-09-17 (a fixed 10 s timeout reaches Req); 2026-09-29 (the `timeout:` option, its bound, and the connect and trickle semantics); amended 2026-09-30 (decision 3 renders lists as lists, issue #20)
 
 ## Context
 
@@ -60,3 +60,4 @@ Req has no attempt-level timer. Its `receive_timeout` bounds each socket read (`
 - PR #6 first review, findings B1 and N1, and probes: https://github.com/vinnie357/typesafe_sdk_ex/pull/6#issuecomment-5902350367
 - PR #6 second review, observation N2 (other connect-timeout routes): https://github.com/vinnie357/typesafe_sdk_ex/pull/6#issuecomment-5902451018
 - Python budget: https://docs.typesafe.ai/sdk/python/api/retries.md (`retries.md:L428-L430`)
+- Issue #20, operator decision (charlist rendering): https://github.com/vinnie357/typesafe_sdk_ex/issues/20#issuecomment-5918195178
