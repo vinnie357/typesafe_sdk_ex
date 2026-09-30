@@ -404,6 +404,12 @@ defmodule TypeSafe.RetryTest do
       assert Retry.delay_ms(2, %{}, @zero_jitter, fn -> 0.5 end) == 2000
     end
 
+    # Half-way case: 500 * 0.875 = 437.5 rounds half away from zero (JS Math.round),
+    # which distinguishes round/1 from trunc/floor.
+    test "backoff rounds half away from zero" do
+      assert Retry.delay_ms(0, nil, %RetryPolicy{}, fn -> 0.5 end) == 438
+    end
+
     test "a huge attempt number is capped at backoff_max_ms and does not raise" do
       assert Retry.delay_ms(2000, nil, @zero_jitter, fn -> 0.0 end) == 5000
     end
@@ -556,6 +562,14 @@ defmodule TypeSafe.RetryTest do
       for status <- [200, 201, 204] do
         assert Retry.decide(request_for(@zero_jitter), response_with(status)) == false
       end
+    end
+
+    # JS checks res.ok before the status set (client.ts:389-397), so a set that
+    # lists 200 still never retries a success.
+    test "a 2xx response is not retried even when http_statuses lists it" do
+      policy = %{@zero_jitter | http_statuses: MapSet.new([200])}
+
+      assert Retry.decide(request_for(policy), response_with(200)) == false
     end
 
     # §11 S3b #23 (retry.test.ts:38-44)
