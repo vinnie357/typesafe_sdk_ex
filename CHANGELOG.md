@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TypeSafe.attach_default_logger/1` and `TypeSafe.detach_default_logger/0`: an
   opt-in `Logger` handler that prints the JS SDK's log lines, prefixed
   `[typesafe-sdk] `. At `:debug` it logs request and response bodies unredacted
-  and masks credential headers. See ADR 0013.
+  and masks credential headers: a `Bearer`, `Basic`, `Token`, `Digest`, or
+  `Negotiate` scheme is kept, and any other value that contains whitespace becomes
+  `***`. See ADR 0013.
 
 ### Changed
 

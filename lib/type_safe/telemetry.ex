@@ -65,11 +65,15 @@ defmodule TypeSafe.Telemetry do
   ## Redaction
 
   Credential headers (`authorization`, `proxy-authorization`, `x-api-key`, `cookie`,
-  `set-cookie`) are redacted before the event is emitted. A value that starts with a
-  letters-only word and a space keeps that word as a "scheme", so a secret of that
-  shape is partly visible (`"LETTERSONLYSECRETKEY x"` becomes
-  `"LETTERSONLYSECRETKEY ***"`). Any other header, such as a custom `default_headers`
-  entry, is reported as given.
+  `set-cookie`) are redacted before the event is emitted. `cookie` and `set-cookie`
+  become `"***"`. For the other three, a value whose first whitespace-separated word
+  is `Bearer`, `Basic`, `Token`, `Digest` or `Negotiate` (any case) keeps that word
+  as given, followed by `***` and the last four characters of the next word when it
+  is longer than eight (`"Bearer abcdefghijkl"` becomes `"Bearer ***ijkl"`). Any
+  other value that contains whitespace, of any kind, becomes `"***"`. A value with no
+  whitespace becomes `"***"` plus its last four characters when it is longer than
+  eight. Any other header, such as a custom `default_headers` entry, is reported as
+  given.
   The `%Req.Request{}` is never put in metadata. See `redact_headers/1`.
   """
 
@@ -92,6 +96,7 @@ defmodule TypeSafe.Telemetry do
 
   @key_headers ["authorization", "proxy-authorization", "x-api-key"]
   @opaque_headers ["cookie", "set-cookie"]
+  @schemes ["bearer", "basic", "token", "digest", "negotiate"]
 
   @doc false
   @spec new_call(TypeSafe.Client.t(), atom(), String.t()) :: map()
@@ -390,17 +395,24 @@ defmodule TypeSafe.Telemetry do
   defp mask(_kind, _value), do: "***"
 
   # JS logging.ts:53-58, with one deviation (ADR 0013 decision 15): the first
-  # whitespace-separated word is a scheme only when it is letters alone. Any other
-  # value, such as a dashed key followed by a space, is masked whole, so no part of
-  # it is echoed as a "scheme". The secret keeps its last four characters only when
-  # it is longer than eight.
+  # whitespace-separated word is a scheme only when it is one of @schemes, compared
+  # without regard to case. A value with whitespace and any other first word is
+  # masked whole as "***", with no tail, so no part of it is echoed. The secret
+  # keeps its last four characters only when it is longer than eight.
   defp redact_key(value) do
-    with true <- String.contains?(value, " "),
+    with true <- Regex.match?(~r/\s/, value),
          [scheme, secret | _rest] <- String.split(value, ~r/\s+/),
-         true <- Regex.match?(~r/^[A-Za-z]+$/, scheme) do
+         true <- String.downcase(scheme) in @schemes do
       scheme <> " ***" <> tail(secret)
     else
-      _no_scheme -> "***" <> tail(value)
+      _no_scheme -> mask_unknown(value)
+    end
+  end
+
+  defp mask_unknown(value) do
+    case Regex.match?(~r/\s/, value) do
+      true -> "***"
+      false -> "***" <> tail(value)
     end
   end
 
