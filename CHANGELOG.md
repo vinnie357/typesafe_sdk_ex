@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `finch:` together with `connect_options:` is rejected at `new/1` instead of
   raising on the first request. Use `finch: [pool_timeout: ms]` rather than the
   deprecated top-level `pool_timeout`.
+  These checks read `req_options` as Req resolves it, where the last of a
+  repeated key wins, so `[finch: [pool_size: 2], finch: [receive_timeout: 5]]`
+  is rejected and `[finch: [receive_timeout: 5], finch: [pool_size: 2]]` is
+  not.
 - `TypeSafe.Error.RateLimit.retry_after_ms` now parses `retry-after-ms`,
   decimal-seconds `Retry-After` values, and HTTP dates (IMF-fixdate, RFC 850,
   asctime), rounded to whole milliseconds; previously only integer seconds

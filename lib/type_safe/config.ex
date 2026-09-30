@@ -123,10 +123,13 @@ defmodule TypeSafe.Config do
   ]
 
   defp validate_req_options_scope(opts) do
-    req_options = Keyword.get(opts, :req_options, [])
+    # Validated as Req resolves it: `Req.new/1` keeps the last of a repeated
+    # key (`Map.new/1`, req.ex:590-598), so a repeated key is judged by the
+    # value Req keeps (spec §4 A').
+    req_options = opts |> Keyword.get(:req_options, []) |> Map.new()
 
     case Enum.find(@rejected_req_options, fn {key, _hint} ->
-           Keyword.has_key?(req_options, key)
+           Map.has_key?(req_options, key)
          end) do
       nil ->
         validate_finch_scope(req_options)
@@ -144,7 +147,7 @@ defmodule TypeSafe.Config do
   @finch_timeout_keys [:receive_timeout, :request_timeout]
 
   defp validate_finch_scope(req_options) do
-    finch = Keyword.get(req_options, :finch)
+    finch = Map.get(req_options, :finch)
 
     cond do
       is_nil(finch) or is_atom(finch) ->
@@ -176,7 +179,7 @@ defmodule TypeSafe.Config do
   end
 
   defp validate_finch_connect_pair(finch, req_options) do
-    case finch && Keyword.has_key?(req_options, :connect_options) do
+    case finch && Map.has_key?(req_options, :connect_options) do
       true ->
         {:error,
          %TypeSafe.Error{
