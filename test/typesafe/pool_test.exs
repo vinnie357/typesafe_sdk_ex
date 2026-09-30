@@ -9,18 +9,18 @@ defmodule TypeSafe.PoolTest do
   # `reason: :pool_timeout` and does not retry it.
   #
   # Shape: a loopback server that accepts and never answers, plus a Finch pool
-  # of one connection started for this test only. Two concurrent calls: one
-  # takes the only connection and waits out its receive timeout, the other
-  # waits `pool_timeout` for a connection and fails. Which call is which is a
-  # race, so the assertions read the pair of outcomes, not their order.
+  # of one connection started for this test only. A HOLDER call takes the only
+  # connection (default pool timeout, long receive timeout) and the test waits
+  # until the server reports the accept. Only then do the WAITER calls run with
+  # a short `pool_timeout`, so which call waits is decided by construction, not
+  # by a race that CPU load can flip.
 
   alias TypeSafe.Error
   alias TypeSafe.StubAdapter
 
-  @pool_timeout_ms 40
-  # Long enough that the connection stays taken while the waiting call fails and
-  # would retry, short enough to keep the module well under a second.
-  @receive_timeout_ms 200
+  @pool_timeout_ms 50
+  # The holder outlives the test; it is shut down at the end of each test.
+  @holder_timeout_ms 5_000
   @request %{state: "s", questions: %{"q" => TypeSafe.noul("q")}}
   # Retries that would fire within milliseconds if a pool timeout were retried.
   @quick_retries [max_retries: 3, backoff_initial_ms: 1, backoff_max_ms: 1, backoff_jitter: 0]
@@ -45,7 +45,7 @@ defmodule TypeSafe.PoolTest do
 
              {:ok, port} = :inet.port(listen)
              send(test_pid, {:listening, port})
-             accept_loop(listen)
+             accept_loop(listen, test_pid)
            end},
           id: make_ref()
         )
@@ -55,7 +55,7 @@ defmodule TypeSafe.PoolTest do
     port
   end
 
-  defp accept_loop(listen) do
+  defp accept_loop(listen, test_pid) do
     case :gen_tcp.accept(listen) do
       {:ok, socket} ->
         handler =
@@ -66,7 +66,8 @@ defmodule TypeSafe.PoolTest do
           end)
 
         :ok = :gen_tcp.controlling_process(socket, handler)
-        accept_loop(listen)
+        send(test_pid, :accepted)
+        accept_loop(listen, test_pid)
 
       {:error, _closed} ->
         :ok
@@ -74,20 +75,36 @@ defmodule TypeSafe.PoolTest do
   end
 
   # One Finch pool with a single connection per host, private to this test.
-  defp pool_client(port) do
+  defp start_pool do
     name = :"typesafe_pool_test_#{System.unique_integer([:positive])}"
     {:ok, _pid} = start_supervised({Finch, name: name, pools: %{default: [size: 1, count: 1]}})
+    name
+  end
 
+  defp client(port, finch_options, timeout) do
     {:ok, client} =
       TypeSafe.new(
         api_key: "k",
         base_url: "http://127.0.0.1:#{port}",
-        timeout: @receive_timeout_ms,
-        req_options: [finch: [name: name, pool_timeout: @pool_timeout_ms]],
+        timeout: timeout,
+        req_options: [finch: finch_options],
         get_env: fn _name -> nil end
       )
 
-    {name, client}
+    client
+  end
+
+  # Takes the pool's only connection and keeps it until the caller shuts the
+  # task down. Returns once the server has accepted the connection.
+  defp start_holder(port, name, call) do
+    holder_client = client(port, [name: name], @holder_timeout_ms)
+    holder = Task.async(fn -> call.(holder_client, []) end)
+    assert_receive :accepted, 5_000
+    holder
+  end
+
+  defp waiter_client(port, name) do
+    client(port, [name: name, pool_timeout: @pool_timeout_ms], @holder_timeout_ms)
   end
 
   # The queue-exception event is how the test counts checkout attempts that
@@ -125,59 +142,58 @@ defmodule TypeSafe.PoolTest do
         end
       end)
     end)
-    |> Task.await_many(5_000)
+    |> Task.await_many(10_000)
   end
 
-  defp outcome({:error, %Error.Connection{reason: :pool_timeout}}), do: :pool_timeout
-  defp outcome({:error, %Error.Timeout{}}), do: :timeout
-  defp outcome({:raised, exception}), do: {:raised, exception.__struct__}
-  defp outcome(other), do: other
+  defp system_one(client, opts), do: TypeSafe.system_one(client, @request, opts)
+  defp list_models(client, opts), do: TypeSafe.list_models(client, opts)
 
-  defp pool_timeout_error({:error, %Error.Connection{reason: :pool_timeout} = error}), do: error
-
-  test "system_one/3 returns a pool_timeout Connection error, without retrying it" do
-    {name, client} = client_for_test()
+  defp assert_pool_timeout_without_retry(call) do
+    port = start_silent_server()
+    name = start_pool()
     count_queue_exceptions(name)
+    holder = start_holder(port, name, call)
+    waiter = waiter_client(port, name)
 
-    results =
-      concurrently(2, fn ->
-        TypeSafe.system_one(client, @request, retry: @quick_retries)
-      end)
+    assert [{:error, %Error.Connection{} = error}] =
+             concurrently(1, fn -> call.(waiter, retry: @quick_retries) end)
 
-    assert Enum.sort(Enum.map(results, &outcome/1)) == [:pool_timeout, :timeout]
-
-    error = results |> Enum.find(&(outcome(&1) == :pool_timeout)) |> pool_timeout_error()
+    assert error.reason == :pool_timeout
     assert error.message == @pool_timeout_message
     assert is_exception(error)
 
     # One failed checkout in total. A retry would queue and fail again while the
-    # other call still holds the connection.
+    # holder still has the connection.
     assert_received {:queue_exception, ^name}
     refute_received {:queue_exception, _name}
+
+    Task.shutdown(holder, :brutal_kill)
+  end
+
+  test "system_one/3 returns a pool_timeout Connection error, without retrying it" do
+    assert_pool_timeout_without_retry(&system_one/2)
   end
 
   test "list_models/2 returns a pool_timeout Connection error, without retrying it" do
-    {name, client} = client_for_test()
-    count_queue_exceptions(name)
-
-    results = concurrently(2, fn -> TypeSafe.list_models(client, retry: @quick_retries) end)
-
-    assert Enum.sort(Enum.map(results, &outcome/1)) == [:pool_timeout, :timeout]
-
-    error = results |> Enum.find(&(outcome(&1) == :pool_timeout)) |> pool_timeout_error()
-    assert error.message == @pool_timeout_message
-
-    assert_received {:queue_exception, ^name}
-    refute_received {:queue_exception, _name}
+    assert_pool_timeout_without_retry(&list_models/2)
   end
 
-  test "with more callers than connections, every call returns a tagged tuple" do
-    {_name, client} = client_for_test()
+  test "with more callers than connections, every waiter returns a pool_timeout error" do
+    port = start_silent_server()
+    name = start_pool()
+    holder = start_holder(port, name, &list_models/2)
+    waiter = waiter_client(port, name)
 
-    results = concurrently(6, fn -> TypeSafe.list_models(client) end)
+    results = concurrently(5, fn -> list_models(waiter, []) end)
 
-    assert Enum.frequencies(Enum.map(results, &outcome/1)) == %{timeout: 1, pool_timeout: 5}
+    assert Enum.frequencies(Enum.map(results, &outcome/1)) == %{pool_timeout: 5}
+
+    Task.shutdown(holder, :brutal_kill)
   end
+
+  defp outcome({:error, %Error.Connection{reason: :pool_timeout}}), do: :pool_timeout
+  defp outcome({:raised, exception}), do: {:raised, exception.__struct__}
+  defp outcome(other), do: other
 
   # Guard, green today: the rescue is scoped to the pool-checkout error and must
   # not turn other raises into errors.
@@ -187,9 +203,5 @@ defmodule TypeSafe.PoolTest do
 
     assert_raise RuntimeError, "adapter boom", fn -> TypeSafe.list_models(client) end
     assert_raise RuntimeError, "adapter boom", fn -> TypeSafe.system_one(client, @request) end
-  end
-
-  defp client_for_test do
-    pool_client(start_silent_server())
   end
 end

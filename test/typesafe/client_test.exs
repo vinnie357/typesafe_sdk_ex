@@ -1044,7 +1044,8 @@ defmodule TypeSafe.ClientTest do
             {[timeout: 5, timeout: 6], "timeout"},
             {[api_key: "a", api_key: "b"], "api_key"},
             {[retry: [max_retries: 1], retry: [max_retries: 2]], "retry"},
-            {[bogus: 1, timeout: 5, timeout: 6], "timeout"}
+            {[bogus: 1, timeout: 5, timeout: 6], "timeout"},
+            {[api_key: "a", timeout: 1, timeout: 2, api_key: "b"], "timeout"}
           ] do
         expected = "#{key} given more than once"
 
@@ -1061,7 +1062,8 @@ defmodule TypeSafe.ClientTest do
             {[with_response: true, with_response: false], "with_response"},
             {[headers: %{}, headers: %{}], "headers"},
             {[retry: [max_retries: 1], retry: [max_retries: 2]], "retry"},
-            {[bogus: 1, timeout: 5, timeout: 6], "timeout"}
+            {[bogus: 1, timeout: 5, timeout: 6], "timeout"},
+            {[headers: %{}, timeout: 1, timeout: 2, headers: %{}], "timeout"}
           ] do
         expected = "#{key} given more than once"
         assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
@@ -1127,15 +1129,29 @@ defmodule TypeSafe.ClientTest do
     # data, and the message reaches logs.
     test "the encoding error message does not include the offending content" do
       assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
-      secret = "hunter2-" <> <<255>>
 
-      assert {:error, %TypeSafe.Error{message: message}} =
-               TypeSafe.system_one(client, %{
-                 state: secret,
-                 questions: %{"q" => TypeSafe.noul("q")}
-               })
+      # Both values print in `inspect/1` and in the raised exception's message,
+      # so a message built from either would contain "hunter2".
+      for state <- [{"hunter2"}, %{a: %Unencodable{a: "hunter2"}}] do
+        assert {:error, %TypeSafe.Error{message: message}} =
+                 TypeSafe.system_one(client, %{
+                   state: state,
+                   questions: %{"q" => TypeSafe.noul("q")}
+                 })
 
-      refute message =~ "hunter2"
+        assert message == "system_one/3 request cannot be encoded as JSON"
+        refute message =~ "hunter2"
+      end
+    end
+
+    # Guard, green today: ordinary trimming is unchanged by the BOM fix.
+    test "guard: whitespace around an api_key is still trimmed" do
+      assert {:ok, client} =
+               StubAdapter.client(StubAdapter.respond(200, ~s({"models":[]})),
+                 api_key: "  sk-1 \n"
+               )
+
+      assert %{"authorization" => ["Bearer sk-1"]} = sent_headers(client)
     end
 
     # Guard, green today: the encoding rescue must not swallow other raises.
@@ -1145,6 +1161,17 @@ defmodule TypeSafe.ClientTest do
       request = %{state: "s", questions: %{"q" => TypeSafe.noul("q")}}
 
       assert_raise RuntimeError, "adapter boom", fn -> TypeSafe.system_one(client, request) end
+    end
+
+    # Guard, green today: the rescue covers the encoding only. An adapter that
+    # raises the same exception class is not "cannot be encoded as JSON".
+    test "guard: a Protocol.UndefinedError raised outside the encoding still raises" do
+      stub = fn _request -> raise Protocol.UndefinedError, protocol: Enumerable, value: :x end
+      assert {:ok, client} = StubAdapter.client(stub)
+      request = %{state: "s", questions: %{"q" => TypeSafe.noul("q")}}
+
+      assert_raise Protocol.UndefinedError, fn -> TypeSafe.system_one(client, request) end
+      assert_raise Protocol.UndefinedError, fn -> TypeSafe.list_models(client) end
     end
   end
 end
