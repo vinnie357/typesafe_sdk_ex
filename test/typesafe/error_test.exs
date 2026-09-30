@@ -317,4 +317,95 @@ defmodule TypeSafe.ErrorTest do
       assert error.body == nil
     end
   end
+
+  # Issue #12 (Gate 4 review of PR #11): a server, or a proxy in front of it,
+  # controls the body, so no `loc` shape may crash a call. JS renders `loc` with
+  # `filter((x) => x !== "body").join(".")` (errors.ts:31), and `Array#join`
+  # turns `null` into "", a nested array into its own comma join, and an object
+  # into "[object Object]". ADR 0006 decision 14 mirrors that literally.
+  # Bodies are passed already decoded (the stub adapter passes a map body
+  # through, as in the D3 test in client_test.exs), so the test needs no JSON
+  # encoder.
+  describe "issue #12: validation loc entries render like JS Array#join" do
+    defp loc_message(loc) do
+      body = %{"detail" => [%{"msg" => "m", "loc" => loc}]}
+      assert {:ok, client} = error_client(422, body)
+
+      assert {:error, %TypeSafe.Error.UnprocessableEntity{message: message}} =
+               TypeSafe.list_models(client)
+
+      message
+    end
+
+    test "a JSON object inside loc renders as [object Object] and does not raise" do
+      assert loc_message([%{"a" => 1}]) == "422 [object Object]: m"
+      assert loc_message([%{}]) == "422 [object Object]: m"
+      assert loc_message(["body", "q", %{"a" => 1}, 2]) == "422 q.[object Object].2: m"
+    end
+
+    test "a nested list inside loc renders as its comma join, with no control bytes" do
+      assert loc_message([[1, 2]]) == "422 1,2: m"
+      assert loc_message([1, [2, [3, %{"a" => 1}]]]) == "422 1.2,3,[object Object]: m"
+      assert loc_message([[1, nil, 2]]) == "422 1,,2: m"
+    end
+
+    # errors.ts:31 filters "body" from the top level only, so a nested "body"
+    # stays.
+    test "only a top-level body entry is dropped" do
+      assert loc_message([["body"]]) == "422 body: m"
+      assert loc_message(["body", ["body", "q"]]) == "422 body,q: m"
+    end
+
+    test "booleans, null, and integers render as in JS" do
+      assert loc_message([1, true, false, nil]) == "422 1.true.false.: m"
+      assert loc_message([0, -1]) == "422 0.-1: m"
+    end
+
+    # An empty join is falsy in JS (errors.ts:32), so the entry is just the msg.
+    test "a loc whose join is empty leaves only the msg" do
+      for loc <- [[nil], [[]], [[nil]], []] do
+        assert loc_message(loc) == "422 m"
+      end
+    end
+
+    # Green today. A loc that is not a list is ignored (errors.ts:31 `Array.isArray`).
+    test "guard: a loc that is not a list leaves only the msg" do
+      for loc <- [%{"a" => 1}, "x", 7, true, nil] do
+        assert loc_message(loc) == "422 m"
+      end
+    end
+
+    test "no combination of JSON values in loc raises, and the message is printable text" do
+      elements = [
+        1,
+        -1,
+        1.5,
+        2.0,
+        true,
+        false,
+        nil,
+        "s",
+        "body",
+        [],
+        [nil],
+        [1, [2]],
+        %{},
+        %{"a" => %{"b" => [1]}},
+        [%{}]
+      ]
+
+      locs =
+        for(a <- elements, do: [a]) ++
+          for(a <- elements, b <- elements, do: [a, b]) ++
+          for(a <- elements, b <- elements, do: ["body", a, [b]])
+
+      for loc <- locs do
+        message = loc_message(loc)
+
+        assert String.valid?(message), "not valid UTF-8 for loc #{inspect(loc)}"
+        assert String.printable?(message), "not printable for loc #{inspect(loc)}"
+        assert message == "422 m" or String.ends_with?(message, ": m")
+      end
+    end
+  end
 end

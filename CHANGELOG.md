@@ -39,6 +39,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"<status> status code (no body)"`; `error.body` is still `nil`.
 - The `TypeSafe.Error.Timeout` moduledoc described the timeout as `client.timeout`
   "until a per-call override" lands. It now states the shipped behavior.
+- A validation `loc` that holds a JSON object or a nested list no longer raises
+  (`Protocol.UndefinedError`, `ArgumentError`) or puts control bytes in the
+  message. It renders as in the JS SDK's `join`: an object as `[object Object]`,
+  a nested list as its comma join.
+- When Finch's pool cannot hand out a connection within `pool_timeout`, the call
+  returns `{:error, %TypeSafe.Error.Connection{reason: :pool_timeout}}` instead
+  of raising a `RuntimeError`. It is not retried. README section "Connection
+  pool" covers sizing with `finch: [size: n]` and `finch: [pool_timeout: ms]`.
+- `TypeSafe.system_one/3` returns `{:error, %TypeSafe.Error{message:
+  "system_one/3 request cannot be encoded as JSON"}}`, and sends nothing, when
+  the request holds a PID, a tuple, a struct without an encoder, a tuple map
+  key, or invalid UTF-8, instead of raising. An improper list still raises. The message never
+  includes the content.
+- `TypeSafe.new/1` trims U+FEFF (the byte order mark) like whitespace, for
+  `api_key` and every environment value, as JS `trim` does. A BOM-only value is
+  blank, and a BOM around a key is no longer sent in the `authorization` header.
+- A repeated option key in `TypeSafe.new/1`, `TypeSafe.system_one/3`, or
+  `TypeSafe.list_models/2` returns `<key> given more than once` instead of
+  `Unknown option(s): <key>`.
 
 ### Changed
 

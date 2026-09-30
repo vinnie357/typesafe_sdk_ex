@@ -53,25 +53,44 @@ defmodule TypeSafe.HTTP do
          {:ok, client} <- validate_call_opts(client, opts),
          {:ok, built_questions} <- TypeSafe.Questions.validate(questions) do
       payload = build_payload(client, request, state, built_questions)
-      headers = Keyword.get(opts, :headers, %{})
-      with_response? = Keyword.get(opts, :with_response, false)
 
-      case send_request(client, headers,
-             method: :post,
-             url: "/v1/systemone",
-             json: payload
-           ) do
-        {:ok, response} ->
-          handle_response(response, with_response?)
-
-        {:error, exception} ->
-          {:error, TypeSafe.Errors.from_transport_error(exception, client.timeout)}
+      with {:ok, body} <- encode_json(payload) do
+        post_system_one(client, opts, body)
       end
     end
   end
 
   def system_one(%TypeSafe.Client{}, request, _opts) when is_map(request) do
     {:error, %TypeSafe.Error{message: malformed_request_message(request)}}
+  end
+
+  defp post_system_one(client, opts, body) do
+    headers = Keyword.get(opts, :headers, %{})
+    with_response? = Keyword.get(opts, :with_response, false)
+
+    case send_request(client, headers,
+           method: :post,
+           url: "/v1/systemone",
+           body: body,
+           headers: [{"content-type", "application/json"}]
+         ) do
+      {:ok, response} ->
+        handle_response(response, with_response?)
+
+      {:error, exception} ->
+        {:error, TypeSafe.Errors.from_transport_error(exception, client.timeout)}
+    end
+  end
+
+  # Encodes with Req's own `json:` step, so the bytes and the exceptions are
+  # Req's (ADR 0003 decision 15). The rescue covers this call only: an adapter
+  # that raises during the send still raises. The message never includes the
+  # offending value, because `state` can hold user data.
+  defp encode_json(payload) do
+    {:ok, Req.Steps.encode_body(Req.new(json: payload)).body}
+  rescue
+    _encoding_error in [Protocol.UndefinedError, Jason.EncodeError] ->
+      {:error, %TypeSafe.Error{message: "system_one/3 request cannot be encoded as JSON"}}
   end
 
   # Names the actual problem (ADR 0011): whichever
@@ -266,9 +285,11 @@ defmodule TypeSafe.HTTP do
   end
 
   defp validate_known_keys(opts) do
-    case Keyword.validate(opts, [:headers, :with_response, :retry, :timeout]) do
-      {:ok, opts} -> {:ok, opts}
-      {:error, invalid_keys} -> {:error, invalid_options_error(invalid_keys)}
+    with :ok <- TypeSafe.Config.check_duplicate_keys(opts) do
+      case Keyword.validate(opts, [:headers, :with_response, :retry, :timeout]) do
+        {:ok, opts} -> {:ok, opts}
+        {:error, invalid_keys} -> {:error, invalid_options_error(invalid_keys)}
+      end
     end
   end
 
@@ -279,6 +300,10 @@ defmodule TypeSafe.HTTP do
   # Retries are wired per call (ADR 0007): `client.req` keeps `retry: false`, and
   # the effective client's policy rides in `request.private` for
   # `TypeSafe.Retry.decide/2`.
+  #
+  # A Finch pool that cannot hand out a connection in time raises instead of
+  # returning an error; that one raise becomes `{:error, :pool_timeout}` here,
+  # outside Req's retry loop, so it is never retried (ADR 0006 decision 15).
   defp send_request(client, call_headers, request_options) do
     client
     |> build_request(call_headers)
@@ -291,7 +316,20 @@ defmodule TypeSafe.HTTP do
           receive_timeout: client.timeout
         ]
     )
+  rescue
+    exception in RuntimeError -> pool_timeout_or_reraise(exception, __STACKTRACE__)
   end
+
+  # restraint: Finch (0.24.0, http1/pool.ex) offers no exception type for this,
+  # only a RuntimeError, so the match is on the start of its message. If Finch
+  # rewords it, this stops matching and the raise returns; pool_test.exs fails
+  # loudly on that. Any other RuntimeError is re-raised untouched.
+  @pool_exhausted_prefix "Finch was unable to provide a connection within the timeout"
+
+  defp pool_timeout_or_reraise(%RuntimeError{message: @pool_exhausted_prefix <> _rest}, _stack),
+    do: {:error, :pool_timeout}
+
+  defp pool_timeout_or_reraise(exception, stacktrace), do: reraise(exception, stacktrace)
 
   defp build_request(client, call_headers) do
     auth = auth_header(client)

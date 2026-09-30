@@ -43,9 +43,25 @@ defmodule TypeSafe.Config do
   end
 
   defp validate_keys_and_build(opts) do
-    case Keyword.validate(opts, @valid_keys) do
-      {:ok, opts} -> validate_and_build(opts)
-      {:error, invalid_keys} -> {:error, invalid_options_error(invalid_keys)}
+    with :ok <- check_duplicate_keys(opts) do
+      case Keyword.validate(opts, @valid_keys) do
+        {:ok, opts} -> validate_and_build(opts)
+        {:error, invalid_keys} -> {:error, invalid_options_error(invalid_keys)}
+      end
+    end
+  end
+
+  @doc false
+  # Shared by `new/1` and the per-call options (ADR 0004 decision 16). Must run
+  # before `Keyword.validate/2`, which reports a repeated known key as unknown.
+  # Same rule as `RetryPolicy.merge/2`: the first element of `keys -- uniq(keys)`.
+  @spec check_duplicate_keys(keyword()) :: :ok | {:error, TypeSafe.Error.t()}
+  def check_duplicate_keys(opts) do
+    keys = Keyword.keys(opts)
+
+    case keys -- Enum.uniq(keys) do
+      [] -> :ok
+      [key | _] -> {:error, %TypeSafe.Error{message: "#{key} given more than once"}}
     end
   end
 
@@ -364,9 +380,19 @@ defmodule TypeSafe.Config do
   defp blank_to_nil(nil), do: nil
 
   defp blank_to_nil(value) when is_binary(value) do
-    case String.trim(value) do
+    case trim_with_bom(value) do
       "" -> nil
       trimmed -> trimmed
+    end
+  end
+
+  # JS `String#trim` strips U+FEFF (the byte order mark); `String.trim/1` does
+  # not, because U+FEFF is not Unicode White_Space (ADR 0004 decision 15).
+  # Repeats until stable so whitespace and BOMs may interleave.
+  defp trim_with_bom(value) do
+    case value |> String.trim() |> String.trim("\u{FEFF}") do
+      ^value -> value
+      trimmed -> trim_with_bom(trimmed)
     end
   end
 

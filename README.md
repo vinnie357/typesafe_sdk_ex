@@ -43,13 +43,14 @@ status-mapped error struct under `TypeSafe.Error.*`:
 - `TypeSafe.Error.RateLimit` (429, carries `retry_after_ms`)
 - `TypeSafe.Error.InternalServer` (5xx, including 529)
 - `TypeSafe.Error.API` (any other non-2xx status, e.g. 409 or 418)
-- `TypeSafe.Error.Connection` (a transport failure — closed socket, DNS, TLS)
+- `TypeSafe.Error.Connection` (a transport failure — closed socket, DNS, TLS — or a
+  busy connection pool, `reason: :pool_timeout`; see [Connection pool](#connection-pool))
 - `TypeSafe.Error.Timeout` (the effective timeout was exceeded)
 
 The generic `TypeSafe.Error` still covers everything that isn't a mapped
 HTTP failure: client-config problems from `new/1`, question-validation
-failures from `system_one/3`, and an unexpected `/v1/models` response
-shape.
+failures from `system_one/3` (including request content JSON cannot encode),
+and an unexpected `/v1/models` response shape.
 
 There is **no shared base struct** — the ten `TypeSafe.Error.*` structs and
 the generic `TypeSafe.Error` are unrelated exceptions. Match on `{:error,
@@ -172,6 +173,53 @@ warning on every `new/1`. `finch:` and `connect_options:` cannot be combined, an
 
 - **No logging.**
 - **No telemetry.**
+
+## Connection pool
+
+Requests share a Finch connection pool, and a request holds one connection for
+its whole round trip. Req's default pool keeps up to 50 connections per host.
+When more calls than that run at once, the extra calls wait for a free
+connection for up to 5_000 ms (Finch's `pool_timeout`). If none frees up in
+time, the call returns an error and sends nothing:
+
+```elixir
+{:error, %TypeSafe.Error.Connection{reason: :pool_timeout}} =
+  TypeSafe.system_one(client, request)
+```
+
+The message is `Connection error: connection pool exhausted (no connection
+available within the pool timeout)`. It is a `TypeSafe.Error.Connection`, not a
+`TypeSafe.Error.Timeout`: `timeout:` limits reads from the socket and does not
+cover this wait. The SDK does not retry it under any `retry:` policy, because a
+retry would queue behind the same busy pool.
+
+Under load, size the pool for the concurrency you run. `finch: [size: n]` makes
+Req start a pool of `n` connections per host for those options, so this client
+can run 200 calls at once against the API host:
+
+```elixir
+{:ok, client} = TypeSafe.new(req_options: [finch: [size: 200]])
+```
+
+To wait longer for a free connection instead, raise `pool_timeout:` (in
+milliseconds):
+
+```elixir
+{:ok, client} = TypeSafe.new(req_options: [finch: [pool_timeout: 15_000]])
+```
+
+To share one pool across clients, or across your application, start a named
+Finch pool in your supervision tree and point the client at it. Pool options
+such as `size:` belong to the pool you start, and `finch:` cannot set both
+`name:` and pool options; `pool_timeout:` may go with `name:`:
+
+```elixir
+children = [{Finch, name: MyApp.Finch, pools: %{default: [size: 200]}}]
+{:ok, _sup} = Supervisor.start_link(children, strategy: :one_for_one)
+
+{:ok, client} =
+  TypeSafe.new(req_options: [finch: [name: MyApp.Finch, pool_timeout: 15_000]])
+```
 
 ## Installation
 

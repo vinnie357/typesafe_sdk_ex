@@ -959,4 +959,219 @@ defmodule TypeSafe.ClientTest do
       refute_received {:sent, _request}
     end
   end
+
+  # Issue #12. ADR 0004 decision 15 (U+FEFF is whitespace for trimming, as in
+  # JS `String#trim`), ADR 0004 decision 16 and ADR 0003 decision 4 (a
+  # duplicated option key is named), ADR 0003 decision 6 (which raise paths
+  # stay), and ADR 0003 decisions 15 and 16 (unencodable request content is an error; a
+  # non-client first argument stays a raise).
+  describe "issue #12: never-raise edge cases" do
+    @bom "\u{FEFF}"
+
+    # A struct with no Jason.Encoder implementation.
+    defmodule Unencodable do
+      defstruct [:a]
+    end
+
+    defp sent_headers(client) do
+      assert {:ok, []} = TypeSafe.list_models(client)
+      assert_received {:sent, request}
+      request.headers
+    end
+
+    test "a BOM-only api_key is rejected like a blank one, even when TYPESAFE_API_KEY is set" do
+      env = %{"TYPESAFE_API_KEY" => "env-key"}
+
+      for api_key <- [@bom, @bom <> @bom, " " <> @bom <> "\t"] do
+        assert {:error, %TypeSafe.Error{message: "TYPESAFE_API_KEY is required."}} =
+                 TypeSafe.new(api_key: api_key, get_env: fn name -> Map.get(env, name) end)
+      end
+    end
+
+    test "a BOM around a real api_key is trimmed like whitespace" do
+      for api_key <- [@bom <> "k", "k" <> @bom, @bom <> " k " <> @bom] do
+        assert {:ok, client} =
+                 StubAdapter.client(StubAdapter.respond(200, ~s({"models":[]})),
+                   api_key: api_key
+                 )
+
+        assert %{"authorization" => ["Bearer k"]} = sent_headers(client)
+      end
+    end
+
+    test "a BOM-only TYPESAFE_API_KEY counts as unset" do
+      get_env = fn
+        "TYPESAFE_API_KEY" -> @bom
+        _name -> nil
+      end
+
+      assert {:error, %TypeSafe.Error{message: "TYPESAFE_API_KEY is required."}} =
+               TypeSafe.new(get_env: get_env)
+    end
+
+    test "a BOM around a real TYPESAFE_API_KEY is trimmed" do
+      get_env = fn
+        "TYPESAFE_API_KEY" -> @bom <> "env-key" <> @bom
+        _name -> nil
+      end
+
+      assert {:ok, client} =
+               StubAdapter.client(StubAdapter.respond(200, ~s({"models":[]})),
+                 api_key: nil,
+                 get_env: get_env
+               )
+
+      assert %{"authorization" => ["Bearer env-key"]} = sent_headers(client)
+    end
+
+    test "a BOM-only environment value counts as unset for the other settings" do
+      get_env = fn
+        "TYPESAFE_DEFAULT_MODEL" -> @bom
+        "TYPESAFE_BASE_URL" -> @bom
+        _name -> nil
+      end
+
+      assert {:ok, client} = TypeSafe.new(api_key: "k", get_env: get_env)
+
+      assert client.default_model == "jev-latest"
+      assert client.base_url == "https://api.typesafe.ai"
+    end
+
+    # Today Keyword.validate/2 reports the duplicate as "Unknown option(s): timeout".
+    # The duplicate check runs first, as for retry (ADR 0007 decision 4).
+    test "new/1 names a duplicated option key" do
+      for {opts, key} <- [
+            {[timeout: 5, timeout: 6], "timeout"},
+            {[api_key: "a", api_key: "b"], "api_key"},
+            {[retry: [max_retries: 1], retry: [max_retries: 2]], "retry"},
+            {[bogus: 1, timeout: 5, timeout: 6], "timeout"},
+            {[api_key: "a", timeout: 1, timeout: 2, api_key: "b"], "timeout"}
+          ] do
+        expected = "#{key} given more than once"
+
+        assert {:error, %TypeSafe.Error{message: ^expected}} =
+                 TypeSafe.new([get_env: fn _name -> nil end] ++ opts)
+      end
+    end
+
+    test "a call names a duplicated option key, and sends nothing" do
+      request = %{state: "s", questions: %{"q" => TypeSafe.noul("q")}}
+
+      for {opts, key} <- [
+            {[timeout: 5, timeout: 6], "timeout"},
+            {[with_response: true, with_response: false], "with_response"},
+            {[headers: %{}, headers: %{}], "headers"},
+            {[retry: [max_retries: 1], retry: [max_retries: 2]], "retry"},
+            {[bogus: 1, timeout: 5, timeout: 6], "timeout"},
+            {[headers: %{}, timeout: 1, timeout: 2, headers: %{}], "timeout"}
+          ] do
+        expected = "#{key} given more than once"
+        assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+        assert {:error, %TypeSafe.Error{message: ^expected}} =
+                 TypeSafe.list_models(client, opts)
+
+        assert {:error, %TypeSafe.Error{message: ^expected}} =
+                 TypeSafe.system_one(client, request, opts)
+
+        refute_received {:sent, _request}
+      end
+    end
+
+    # Green today: ADR 0003 decision 6 keeps a first argument that is not a
+    # client as a caller error (a programming mistake at the call site, like a
+    # builder guard), so these pin the documented raise.
+    test "guard: a first argument that is not a %TypeSafe.Client{} raises FunctionClauseError" do
+      request = %{state: "s", questions: %{"q" => TypeSafe.noul("q")}}
+
+      for not_a_client <- [:x, nil, %{}, %{base_url: "http://x"}, []] do
+        assert_raise FunctionClauseError, fn -> TypeSafe.list_models(not_a_client) end
+        assert_raise FunctionClauseError, fn -> TypeSafe.list_models(not_a_client, []) end
+        assert_raise FunctionClauseError, fn -> TypeSafe.system_one(not_a_client, request) end
+        assert_raise FunctionClauseError, fn -> TypeSafe.system_one(not_a_client, request, []) end
+      end
+    end
+
+    test "request content that JSON cannot encode returns an error and sends nothing" do
+      unencodable = %Unencodable{a: 1}
+      question = TypeSafe.noul("q")
+
+      requests = [
+        {"a PID in state", %{state: %{a: self()}, questions: %{"q" => question}}},
+        {"a tuple in state", %{state: {1, 2}, questions: %{"q" => question}}},
+        {"a tuple map key in state", %{state: %{{1, 2} => 1}, questions: %{"q" => question}}},
+        {"invalid UTF-8 in state", %{state: <<255, 254>>, questions: %{"q" => question}}},
+        {"invalid UTF-8 in instructions",
+         %{state: "s", questions: %{"q" => TypeSafe.noul(<<255>>)}}},
+        {"a tuple inside criteria",
+         %{state: "s", questions: %{"q" => TypeSafe.noul("q", %{a: {1}})}}},
+        {"a PID inside criteria",
+         %{state: "s", questions: %{"q" => TypeSafe.noul("q", %{a: self()})}}},
+        {"a struct without an encoder as criteria",
+         %{state: "s", questions: %{"q" => TypeSafe.noul("q", unencodable)}}},
+        {"a PID in an extra request key",
+         %{state: "s", questions: %{"q" => question}, extra: self()}}
+      ]
+
+      for {label, request} <- requests do
+        assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+        assert {:error,
+                %TypeSafe.Error{message: "system_one/3 request cannot be encoded as JSON"}} =
+                 TypeSafe.system_one(client, request),
+               "expected an error for #{label}"
+
+        refute_received {:sent, _request}
+      end
+    end
+
+    # The error message must not echo the offending value: state can hold user
+    # data, and the message reaches logs.
+    test "the encoding error message does not include the offending content" do
+      assert {:ok, client} = StubAdapter.client(StubAdapter.respond(200, @system_one_response))
+
+      # Both values print in `inspect/1` and in the raised exception's message,
+      # so a message built from either would contain "hunter2".
+      for state <- [{"hunter2"}, %{a: %Unencodable{a: "hunter2"}}] do
+        assert {:error, %TypeSafe.Error{message: message}} =
+                 TypeSafe.system_one(client, %{
+                   state: state,
+                   questions: %{"q" => TypeSafe.noul("q")}
+                 })
+
+        assert message == "system_one/3 request cannot be encoded as JSON"
+        refute message =~ "hunter2"
+      end
+    end
+
+    # Guard, green today: ordinary trimming is unchanged by the BOM fix.
+    test "guard: whitespace around an api_key is still trimmed" do
+      assert {:ok, client} =
+               StubAdapter.client(StubAdapter.respond(200, ~s({"models":[]})),
+                 api_key: "  sk-1 \n"
+               )
+
+      assert %{"authorization" => ["Bearer sk-1"]} = sent_headers(client)
+    end
+
+    # Guard, green today: the encoding rescue must not swallow other raises.
+    test "guard: a stub adapter that raises is not turned into an error" do
+      stub = fn _request -> raise RuntimeError, "adapter boom" end
+      assert {:ok, client} = StubAdapter.client(stub)
+      request = %{state: "s", questions: %{"q" => TypeSafe.noul("q")}}
+
+      assert_raise RuntimeError, "adapter boom", fn -> TypeSafe.system_one(client, request) end
+    end
+
+    # Guard, green today: the rescue covers the encoding only. An adapter that
+    # raises the same exception class is not "cannot be encoded as JSON".
+    test "guard: a Protocol.UndefinedError raised outside the encoding still raises" do
+      stub = fn _request -> raise Protocol.UndefinedError, protocol: Enumerable, value: :x end
+      assert {:ok, client} = StubAdapter.client(stub)
+      request = %{state: "s", questions: %{"q" => TypeSafe.noul("q")}}
+
+      assert_raise Protocol.UndefinedError, fn -> TypeSafe.system_one(client, request) end
+      assert_raise Protocol.UndefinedError, fn -> TypeSafe.list_models(client) end
+    end
+  end
 end
