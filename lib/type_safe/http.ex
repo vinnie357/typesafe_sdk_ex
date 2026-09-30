@@ -34,9 +34,9 @@ defmodule TypeSafe.HTTP do
   @spec list_models(TypeSafe.Client.t(), keyword()) ::
           {:ok, [map()] | TypeSafe.with_response_result()} | {:error, Exception.t()}
   def list_models(%TypeSafe.Client{} = client, opts) do
-    case Keyword.validate(opts, [:headers, :with_response, :retry, :timeout]) do
+    case validate_call_keys(opts, "list_models/2") do
       {:ok, opts} -> validate_and_list_models(client, opts)
-      {:error, invalid_keys} -> {:error, invalid_options_error(invalid_keys)}
+      {:error, %TypeSafe.Error{}} = error -> error
     end
   end
 
@@ -49,7 +49,7 @@ defmodule TypeSafe.HTTP do
         opts
       )
       when is_map(questions) do
-    with {:ok, opts} <- Keyword.validate(opts, [:headers, :with_response, :retry, :timeout]),
+    with {:ok, opts} <- validate_call_keys(opts, "system_one/3"),
          {:ok, client} <- validate_call_opts(client, opts),
          {:ok, built_questions} <- TypeSafe.Questions.validate(questions) do
       payload = build_payload(client, request, state, built_questions)
@@ -67,9 +67,6 @@ defmodule TypeSafe.HTTP do
         {:error, exception} ->
           {:error, TypeSafe.Errors.from_transport_error(exception, client.timeout)}
       end
-    else
-      {:error, %TypeSafe.Error{}} = error -> error
-      {:error, invalid_keys} -> {:error, invalid_options_error(invalid_keys)}
     end
   end
 
@@ -253,6 +250,25 @@ defmodule TypeSafe.HTTP do
     case Req.Response.get_header(response, "x-typesafe-request-id") do
       [id | _] -> id
       [] -> nil
+    end
+  end
+
+  # Call options must be a keyword list with known keys; anything else is an
+  # error value, never a raise (ADR 0003 decision 4).
+  defp validate_call_keys(opts, function) do
+    case Keyword.keyword?(opts) do
+      true ->
+        validate_known_keys(opts)
+
+      false ->
+        {:error, %TypeSafe.Error{message: "#{function} requires a keyword list of options"}}
+    end
+  end
+
+  defp validate_known_keys(opts) do
+    case Keyword.validate(opts, [:headers, :with_response, :retry, :timeout]) do
+      {:ok, opts} -> {:ok, opts}
+      {:error, invalid_keys} -> {:error, invalid_options_error(invalid_keys)}
     end
   end
 

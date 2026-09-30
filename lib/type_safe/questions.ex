@@ -13,9 +13,9 @@ defmodule TypeSafe.Questions do
   @spec noul(term()) :: TypeSafe.question()
   def noul(instructions), do: %{type: "noul", instructions: instructions}
 
-  @doc "Builds a `noul` question with `instructions` and `criteria` (may be `nil`)."
+  @doc "Builds a `noul` question with `instructions` and `criteria` (a map or `nil`)."
   @spec noul(term(), map() | nil) :: TypeSafe.question()
-  def noul(instructions, criteria) do
+  def noul(instructions, criteria) when is_map(criteria) or is_nil(criteria) do
     %{type: "noul", instructions: instructions, criteria: criteria}
   end
 

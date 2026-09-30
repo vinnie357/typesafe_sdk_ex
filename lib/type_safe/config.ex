@@ -291,19 +291,27 @@ defmodule TypeSafe.Config do
     end
   end
 
+  # `nil` is "not given" and falls back to the environment. An explicit blank
+  # string is a caller mistake, so it is rejected even when the environment
+  # supplies a key (ADR 0004 decision 7).
   defp resolve_api_key(opts, get_env) do
-    case opts |> Keyword.get(:api_key) |> blank_to_nil() do
-      nil ->
-        case safe_env_value(get_env, "TYPESAFE_API_KEY") do
-          {:ok, nil} -> {:error, %TypeSafe.Error{message: "TYPESAFE_API_KEY is required."}}
-          {:ok, value} -> {:ok, value}
-          {:error, %TypeSafe.Error{}} = error -> error
-        end
-
-      value ->
-        {:ok, value}
+    case Keyword.get(opts, :api_key) do
+      nil -> env_api_key(get_env)
+      api_key -> present_api_key(blank_to_nil(api_key))
     end
   end
+
+  defp env_api_key(get_env) do
+    case safe_env_value(get_env, "TYPESAFE_API_KEY") do
+      {:ok, value} -> present_api_key(value)
+      {:error, %TypeSafe.Error{}} = error -> error
+    end
+  end
+
+  defp present_api_key(nil),
+    do: {:error, %TypeSafe.Error{message: "TYPESAFE_API_KEY is required."}}
+
+  defp present_api_key(api_key), do: {:ok, api_key}
 
   defp resolve_string(opts, key, env_name, get_env, default) do
     case Keyword.get(opts, key) do
