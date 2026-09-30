@@ -258,8 +258,12 @@ defmodule TypeSafe.TimeoutTest do
     # A long-lived acceptor process owns the listener and accepts in a loop,
     # one linked process per connection. A single-accept server produced a
     # false `:closed` in the PR #3 review, so the shape matters. The first
-    # request seen is answered after `delay_ms`; every later one at once.
-    defp start_server(delay_ms) do
+    # request seen is held until the test sends its handler `:release`, so no
+    # wall-clock delay decides whether the client times out first (#15); every
+    # later request is answered at once. The server messages the test
+    # `{:first_request, handler}` when the first request has arrived and
+    # `:later_request` when a further one has (on the same or a new connection).
+    defp start_server do
       test_pid = self()
       requests = :atomics.new(1, [])
 
@@ -278,7 +282,7 @@ defmodule TypeSafe.TimeoutTest do
 
                {:ok, port} = :inet.port(listen)
                send(test_pid, {:listening, listen, port})
-               accept_loop(listen, requests, delay_ms)
+               accept_loop(listen, requests, test_pid)
              end},
             id: make_ref()
           )
@@ -289,42 +293,75 @@ defmodule TypeSafe.TimeoutTest do
       port
     end
 
-    defp accept_loop(listen, requests, delay_ms) do
+    defp accept_loop(listen, requests, test_pid) do
       case :gen_tcp.accept(listen) do
         {:ok, socket} ->
-          handler = spawn_link(fn -> receive_go_then_serve(socket, requests, delay_ms) end)
+          handler = spawn_link(fn -> receive_go_then_serve(socket, requests, test_pid) end)
           :ok = :gen_tcp.controlling_process(socket, handler)
           send(handler, :go)
-          accept_loop(listen, requests, delay_ms)
+          accept_loop(listen, requests, test_pid)
 
         {:error, _closed} ->
           :ok
       end
     end
 
-    defp receive_go_then_serve(socket, requests, delay_ms) do
+    defp receive_go_then_serve(socket, requests, test_pid) do
       receive do
-        :go -> serve(socket, "", requests, delay_ms)
+        :go -> serve(socket, "", requests, test_pid)
       end
     end
 
-    defp serve(socket, buffer, requests, delay_ms) do
+    defp serve(socket, buffer, requests, test_pid) do
       case String.split(buffer, "\r\n\r\n", parts: 2) do
         [_request, rest] ->
-          respond(socket, requests, delay_ms)
-          serve(socket, rest, requests, delay_ms)
+          rest =
+            if :atomics.add_get(requests, 1, 1) == 1 do
+              send(test_pid, {:first_request, self()})
+              hold(socket, rest, test_pid)
+            else
+              send(test_pid, :later_request)
+              rest
+            end
+
+          respond(socket)
+          serve(socket, rest, requests, test_pid)
 
         [_incomplete] ->
           case :gen_tcp.recv(socket, 0, 5_000) do
-            {:ok, data} -> serve(socket, buffer <> data, requests, delay_ms)
+            {:ok, data} -> serve(socket, buffer <> data, requests, test_pid)
             {:error, _closed_or_timeout} -> :ok
           end
       end
     end
 
-    defp respond(socket, requests, delay_ms) do
-      if :atomics.add_get(requests, 1, 1) == 1, do: Process.sleep(delay_ms)
+    # Holds the first response until `:release`. Bytes that arrive meanwhile
+    # (a request pipelined behind the timed-out one) are read so the test can
+    # be told, via `:later_request`, that the second call is on the wire; the
+    # unread remainder is returned so nothing is lost.
+    defp hold(socket, buffer, test_pid) do
+      if String.contains?(buffer, "\r\n\r\n"), do: send(test_pid, :later_request)
+      :ok = :inet.setopts(socket, active: :once)
 
+      receive do
+        {:tcp, ^socket, data} ->
+          hold(socket, buffer <> data, test_pid)
+
+        {:tcp_closed, ^socket} ->
+          buffer
+
+        :release ->
+          :ok = :inet.setopts(socket, active: false)
+
+          receive do
+            {:tcp, ^socket, data} -> buffer <> data
+          after
+            0 -> buffer
+          end
+      end
+    end
+
+    defp respond(socket) do
       _ =
         :gen_tcp.send(socket, [
           "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ",
@@ -346,10 +383,10 @@ defmodule TypeSafe.TimeoutTest do
     # Regression for the Mint 1.11 / Finch 0.23.0 bug found in PR #3: a receive
     # timeout left the request in flight on a pooled connection, and an
     # immediate retry was pipelined behind it and raised on the stale
-    # response. The second call carries a long per-call timeout so it is still
-    # waiting when the delayed first response lands.
+    # response. The second call carries a long per-call timeout so it outlives
+    # the released first response.
     test "a call after a receive timeout on the same client never raises" do
-      port = start_server(150)
+      port = start_server()
 
       {:ok, client} =
         new_client(
@@ -360,7 +397,15 @@ defmodule TypeSafe.TimeoutTest do
 
       assert {:error, %Error.Timeout{timeout_ms: 50}} = TypeSafe.list_models(client)
 
-      result = TypeSafe.list_models(client, timeout: 2_000)
+      # The client has given up. Only once the second call is on the wire may
+      # the server answer the first, so the stale response reaches the pooled
+      # connection strictly after the timeout and while the second call waits.
+      assert_receive {:first_request, handler}, 5_000
+      second = Task.async(fn -> TypeSafe.list_models(client, timeout: 2_000) end)
+      assert_receive :later_request, 5_000
+      send(handler, :release)
+
+      result = Task.await(second, 5_000)
 
       assert clean?(result), "expected {:ok, _} or a TypeSafe.Error, got: #{inspect(result)}"
     end
