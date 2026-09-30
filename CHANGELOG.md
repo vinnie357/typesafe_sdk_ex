@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[typesafe-sdk] `. At `:debug` it logs request and response bodies unredacted
   and masks credential headers: a `Bearer`, `Basic`, `Token`, `Digest`, or
   `Negotiate` scheme is kept, and any other value that contains whitespace (Unicode
-  whitespace or U+FEFF) becomes `***`. See ADR 0013.
+  whitespace or U+FEFF, or ASCII whitespace when the value is not valid UTF-8) becomes `***`. See ADR 0013.
 
 ### Changed
 

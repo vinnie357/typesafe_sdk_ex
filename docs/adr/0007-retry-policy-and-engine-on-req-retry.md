@@ -1,7 +1,7 @@
 # ADR 0007: Retry policy and engine on Req's `:retry`
 
 **Status:** Accepted
-**Date:** 2026-09-29; amended 2026-09-30 (issue #12); amended 2026-09-30 (telemetry, issue #13); the struct, defaults, and `inspect` rendering date from 2026-09-17
+**Date:** 2026-09-29; amended 2026-09-30 (issue #12); amended 2026-09-30 (telemetry, issue #13); amended 2026-09-30 (charlist rendering, issue #20); the struct, defaults, and `inspect` rendering date from 2026-09-17
 
 ## Context
 
@@ -33,6 +33,8 @@ Left on, that default retried a `GET /v1/models` 503 four times over about 6.7 s
    - a key given more than once: `"retry.max_retries given more than once"`
    - an unknown key: `"retry has unknown option(s): bogus"`
    - an invalid value: `"retry.max_retries must be a non-negative integer, got -1"`
+
+   Each message that shows the caller's value renders it with `inspect(value, charlists: :as_lists)`, so `http_statuses: [99]` reports `got [99]`, not `got ~c"c"` (issue #20).
 4. The duplicate-key check runs before the unknown-key check, because `Keyword.validate/2` reports a duplicate as unknown.
 5. `max_retries`, `backoff_initial_ms`, `backoff_max_ms`, and `max_retry_after_ms` are non-negative integers. `backoff_jitter` is a number from 0 to 1. The flags are booleans.
 6. `http_statuses` is a list, `Range`, or `MapSet` of integers from 100 to 999. The SDK stores it as a `MapSet`. The SDK bounds-checks a `Range` before it expands it, so a huge range cannot hang validation.
@@ -85,6 +87,7 @@ Left on, that default retried a `GET /v1/models` 503 four times over about 6.7 s
 - JS: `src/retry.ts:11-23,56-68`, `src/types.ts:175-194` (the `RetryPolicy` type), `src/client.ts:70-84,102-147,150-154,337,364-400,383-385`, `test/retry.test.ts:38-125`, `test/reliability.test.ts:51-166,195-199,383-421`, `test/types.test-d.ts:132-133`.
 - Req 0.7.4: `lib/req/steps.ex:1670-1700,1704,1720-1722,1748-1753,1775,1803-1815,1807-1822,1808-1817,1824-1840`, `lib/req/request.ex:1032-1050`.
 - This repository: `lib/type_safe/retry.ex:53,61-66,103` (clock read, exact rounding, jitter), `lib/type_safe/retry_policy.ex`.
+- Issue #20, operator decision (charlist rendering): https://github.com/vinnie357/typesafe_sdk_ex/issues/20#issuecomment-5918195178
 - PR #1 review round 1, finding B2 (Req's default retry ran): https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5714770534
 - PR #1 review round 3, finding D4 (bracketed `http_statuses` in `inspect`): https://github.com/vinnie357/typesafe_sdk_ex/pull/1#issuecomment-5722393470
 - PR #4 review round 2, carried finding (the ceiling belongs in the retry loop): https://github.com/vinnie357/typesafe_sdk_ex/pull/4#issuecomment-5901419967
