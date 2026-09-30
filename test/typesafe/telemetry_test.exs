@@ -774,6 +774,13 @@ defmodule TypeSafe.TelemetryTest do
 
       assert redact(%{"authorization" => ["Custom#{line_separator}abcd"]}) ==
                %{"authorization" => ["***"]}
+
+      # Two more code points, so a hard-coded list of the ones above fails.
+      assert redact(%{"authorization" => ["Custom#{<<0xFEFF::utf8>>}abcd"]}) ==
+               %{"authorization" => ["***"]}
+
+      assert redact(%{"authorization" => ["Custom#{<<0x2002::utf8>>}abcd"]}) ==
+               %{"authorization" => ["***"]}
     end
 
     # Red on fe4fa5f: the scheme is not recognised, so the whole value keeps a tail.
@@ -786,6 +793,9 @@ defmodule TypeSafe.TelemetryTest do
 
       assert redact(%{"authorization" => ["Token#{ideographic_space}abcdefghijkl"]}) ==
                %{"authorization" => ["Token ***ijkl"]}
+
+      assert redact(%{"authorization" => ["Bearer#{<<0xFEFF::utf8>>}abcdefghijkl"]}) ==
+               %{"authorization" => ["Bearer ***ijkl"]}
     end
 
     # Green controls on fe4fa5f: invalid UTF-8 must never raise and keeps the ASCII
