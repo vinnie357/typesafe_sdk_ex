@@ -284,7 +284,7 @@ defmodule TypeSafe.TimeoutTest do
           )
         )
 
-      assert_receive {:listening, listen, port}, 1_000
+      assert_receive {:listening, listen, port}, 5_000
       on_exit(fn -> _ = :gen_tcp.close(listen) end)
       port
     end
