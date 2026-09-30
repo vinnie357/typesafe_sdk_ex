@@ -365,6 +365,51 @@ defmodule TypeSafe.TelemetryTest do
     refute inspect(all_events, limit: :infinity, printable_limit: :infinity) =~ @secret
   end
 
+  test "at :debug a default header whose value hides a space after a dashed word is fully masked" do
+    client =
+      client(StubAdapter.respond(200, @ok_body),
+        log_level: :debug,
+        default_headers: %{"x-api-key" => "sk-live-SUPERSECRETVALUE9 x"}
+      )
+
+    assert {:ok, []} = list_models(client)
+
+    events = events()
+    all_lines = texts(events)
+    refute all_lines == []
+    refute Enum.any?(all_lines, &String.contains?(&1, "SUPERSECRETVALUE9"))
+    refute inspect(events, limit: :infinity, printable_limit: :infinity) =~ "SUPERSECRETVALUE9"
+  end
+
+  test "at :debug credentials in the base_url never reach the url metadata or the lines" do
+    client =
+      client(StubAdapter.respond(200, @ok_body),
+        log_level: :debug,
+        base_url: "https://user:hunter2pw@x.test"
+      )
+
+    assert {:ok, []} = list_models(client)
+
+    assert [{@start, _, %{url: url}} | _rest] = events = events()
+    assert url =~ "x.test/v1/models"
+    refute url =~ "hunter2pw"
+    refute url =~ "user:"
+
+    all_lines = texts(events)
+    refute all_lines == []
+    refute Enum.any?(all_lines, &(&1 =~ "hunter2pw" or &1 =~ "user:"))
+  end
+
+  test "an empty x-typesafe-request-id header adds no suffix to the summary line" do
+    headers = [{"content-type", "application/json"}, {"x-typesafe-request-id", ""}]
+    client = client(StubAdapter.respond(200, @ok_body, headers), log_level: :info)
+
+    assert {:ok, []} = list_models(client)
+
+    assert [{:info, line}] = lines(events())
+    assert line =~ ~r{^#\d+ GET /v1/models <- 200 in \d+ms$}
+  end
+
   test "concurrent calls on one client get different request numbers" do
     client = client(StubAdapter.respond(200, @ok_body), log_level: :info)
 
@@ -445,6 +490,15 @@ defmodule TypeSafe.TelemetryTest do
                  @stop,
                  duration(),
                  stop(:info, %{status: 200, request_id: "r1"})
+               ])
+    end
+
+    test "an empty request id adds no suffix" do
+      assert [{:info, "#7 GET /v1/models <- 200 in 1234ms"}] =
+               telemetry(:log_lines, [
+                 @stop,
+                 duration(),
+                 stop(:info, %{status: 200, request_id: ""})
                ])
     end
 
@@ -549,6 +603,29 @@ defmodule TypeSafe.TelemetryTest do
                %{"authorization" => ["Scheme ***"]}
 
       assert redact(%{"authorization" => ["Bearer "]}) == %{"authorization" => ["Bearer ***"]}
+    end
+
+    # The first word is a scheme only when it is letters alone; otherwise the whole
+    # value is the secret, masked as "***" plus the last four characters when the
+    # whole value is longer than eight.
+    test "a dashed first word is not a scheme: x-api-key is masked whole" do
+      assert redact(%{"x-api-key" => ["sk-live-SUPERSECRETVALUE9 x"]}) ==
+               %{"x-api-key" => ["***E9 x"]}
+    end
+
+    test "a first word with a digit is not a scheme: a trailing space does not hide it" do
+      assert redact(%{"proxy-authorization" => ["SECRETPROXYTOKEN1 "]}) ==
+               %{"proxy-authorization" => ["***EN1 "]}
+    end
+
+    test "a first word with digits and dashes is not a scheme: masked whole" do
+      assert redact(%{"authorization" => ["tok3n-with-digits secret"]}) ==
+               %{"authorization" => ["***cret"]}
+    end
+
+    test "a letters-only scheme is kept" do
+      assert redact(%{"authorization" => ["Token abcdefghijkl"]}) ==
+               %{"authorization" => ["Token ***ijkl"]}
     end
 
     test "every value of a multi-value header is redacted" do
