@@ -18,7 +18,7 @@ The JS SDK exposes a `TypeSafeClient` class, a lazy `APIPromise`, and a `Models`
    - `new/1` with a `get_env` function that itself raises.
    - `new/1` with an unknown key inside `req_options`: Req raises `ArgumentError` (#7).
    - A call with `req_options: [http_errors: :raise]` after a non-2xx response raises `RuntimeError` (#7).
-   - A first call on a client built with `finch: [name: ...]` or the deprecated `finch: :name` raises `ArgumentError` (#7).
+   - A first call on a client built with `finch: [name: Req.Finch, pool_size: 2]` (a name together with pool options) or the deprecated `finch: :unregistered_name` raises `ArgumentError` (#7). A plain `finch: [name: MyFinch]` for a running pool works.
    - `system_one/3` with a request that is not a map raises `FunctionClauseError`.
    - A builder call that fails its guard raises `FunctionClauseError` (ADR 0011). This includes a value that is not a map passed as the criteria itself, such as `noul("i", {1})`. A tuple or PID inside a criteria map passes the guard and is handled by decision 15.
    - A first argument that is not a `%TypeSafe.Client{}` (`list_models(:x)`, `system_one(:x, request)`) raises `FunctionClauseError`. Decision 16 records why.
