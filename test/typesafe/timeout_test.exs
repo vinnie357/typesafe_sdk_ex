@@ -365,4 +365,79 @@ defmodule TypeSafe.TimeoutTest do
       assert clean?(result), "expected {:ok, _} or a TypeSafe.Error, got: #{inspect(result)}"
     end
   end
+
+  # §11 S3c #57 (Gate 4 B2, PR #6). Req merges `finch:` request options over the
+  # top-level ones (req/finch.ex:237-240), so each of these would let
+  # `Timeout{timeout_ms}` report a number that did not fire.
+  test "req_options cannot override the timeout through request_timeout" do
+    assert {:error, %Error{message: message}} = new_client(req_options: [request_timeout: 5])
+
+    assert message ==
+             "req_options must not set request_timeout; " <>
+               "use the client's own timeout option instead"
+  end
+
+  test "req_options cannot override the timeout through finch options" do
+    for key <- [:receive_timeout, :request_timeout],
+        finch <- [[{key, 5}], [{:pool_size, 2}, {key, 5}]] do
+      assert {:error, %Error{message: message}} = new_client(req_options: [finch: finch])
+
+      assert message =~ "req_options must not set"
+      assert message =~ "finch"
+      assert message =~ Atom.to_string(key)
+      assert message =~ "use the client's own timeout option instead"
+    end
+  end
+
+  # Green when written: pins the non-deprecated pool-timeout route (spec §4 R2).
+  test "finch options that leave the timeout alone stay accepted" do
+    for finch <- [[pool_timeout: 1_000], [pool_size: 2]] do
+      assert {:ok, %TypeSafe.Client{}} = new_client(req_options: [finch: finch])
+    end
+  end
+
+  # §11 S3c #58 (Gate 4 N1): :gen_tcp encodes the timeout in 32 bits.
+  # The largest value is accepted today, so this one is green when written.
+  test "the largest timeout, 4_294_967_295, is accepted at new/1 and per call" do
+    for function <- @functions do
+      {:ok, client} = stub_client(StubAdapter.respond(200, @ok_body), timeout: 4_294_967_295)
+      assert {:ok, _data} = call(function, client, [])
+      assert receive_timeouts() == [4_294_967_295]
+
+      {:ok, client} = stub_client(StubAdapter.respond(200, @ok_body), [])
+      assert {:ok, _data} = call(function, client, timeout: 4_294_967_295)
+      assert receive_timeouts() == [4_294_967_295]
+    end
+  end
+
+  test "a timeout above 4_294_967_295 is rejected at new/1 and per call, naming the bound" do
+    for bad <- [4_294_967_296, 2 ** 64] do
+      expected = "timeout must be at most 4294967295 ms, got #{bad}"
+
+      assert {:error, %Error{message: ^expected}} = new_client(timeout: bad)
+
+      for function <- @functions do
+        {:ok, client} = stub_client(StubAdapter.respond(200, @ok_body), [])
+
+        assert {:error, %Error{message: ^expected}} = call(function, client, timeout: bad)
+        assert drain_sent() == []
+      end
+    end
+  end
+
+  # §11 S3c #59 (Gate 4 N3): Req raises ArgumentError for this pair on the
+  # first request, and the SDK never raises, so new/1 rejects it up front.
+  test "finch together with connect_options is rejected at new/1, and each alone is accepted" do
+    for finch <- [[pool_timeout: 1_000], [pool_size: 2]] do
+      assert {:error, %Error{message: message}} =
+               new_client(req_options: [finch: finch, connect_options: [timeout: 300]])
+
+      assert message =~ "req_options"
+      assert message =~ "finch"
+      assert message =~ "connect_options"
+    end
+
+    assert {:ok, %TypeSafe.Client{}} = new_client(req_options: [finch: [pool_timeout: 1_000]])
+    assert {:ok, %TypeSafe.Client{}} = new_client(req_options: [connect_options: [timeout: 300]])
+  end
 end
