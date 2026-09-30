@@ -288,10 +288,14 @@ Your application's `Logger` level has to allow `:info` or `:debug` too, or
 
 At `:debug` the log contains request bodies, which hold your `state` and question
 text, and response bodies, unredacted. Only credential headers are masked:
-`authorization`, `proxy-authorization`, and `x-api-key` keep a letters-only scheme
-and the last four characters of a secret longer than eight characters
-(`Bearer ***cdef`). A value that does not start with a letters-only word and a
-space is masked whole (`***cdef`), and `cookie` and `set-cookie` become `***`.
+`authorization`, `proxy-authorization`, and `x-api-key` keep a `Bearer`, `Basic`,
+`Token`, `Digest`, or `Negotiate` scheme (any case) and the last four characters
+of a secret longer than eight characters (`Bearer ***cdef`). Any other value that
+contains whitespace is masked as `***`, a value with no whitespace is masked as
+`***` plus its last four characters when it is longer than eight, and `cookie` and
+`set-cookie` become `***`. Whitespace here is Unicode whitespace plus U+FEFF, which
+is close to, not exactly, what JS treats as whitespace; a value split only by a
+zero-width space (U+200B) counts as having none.
 A header with any other name, such as a custom `default_headers` entry, is
 printed as given, and the URL is printed without any `user:password@` part. The last four
 characters of your API key therefore appear in a `:debug` log. Use `:debug`

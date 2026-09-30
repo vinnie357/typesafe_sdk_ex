@@ -65,11 +65,19 @@ defmodule TypeSafe.Telemetry do
   ## Redaction
 
   Credential headers (`authorization`, `proxy-authorization`, `x-api-key`, `cookie`,
-  `set-cookie`) are redacted before the event is emitted. A value that starts with a
-  letters-only word and a space keeps that word as a "scheme", so a secret of that
-  shape is partly visible (`"LETTERSONLYSECRETKEY x"` becomes
-  `"LETTERSONLYSECRETKEY ***"`). Any other header, such as a custom `default_headers`
-  entry, is reported as given.
+  `set-cookie`) are redacted before the event is emitted. `cookie` and `set-cookie`
+  become `"***"`. For the other three, the value is split on its first run of
+  whitespace: Unicode whitespace plus U+FEFF on valid UTF-8, ASCII whitespace on
+  invalid UTF-8. This is close to, not the same as, JS `\s` (ADR 0013 decision 15).
+  When the first word is `Bearer`, `Basic`, `Token`, `Digest` or `Negotiate` (any
+  case), it is kept as given, followed by `***` and the last four graphemes of the
+  second word when that word is longer than eight (`"Bearer abcdefghijkl"` becomes
+  `"Bearer ***ijkl"`); a third or later word is dropped. Any other value that
+  contains whitespace, including a leading space, becomes `"***"`. A value with no
+  whitespace becomes `"***"` plus its last four graphemes when it is longer than
+  eight. A value that a zero-width space (U+200B) alone separates counts as having
+  no whitespace. Any other header, such as a custom `default_headers` entry, is
+  reported as given.
   The `%Req.Request{}` is never put in metadata. See `redact_headers/1`.
   """
 
@@ -92,6 +100,7 @@ defmodule TypeSafe.Telemetry do
 
   @key_headers ["authorization", "proxy-authorization", "x-api-key"]
   @opaque_headers ["cookie", "set-cookie"]
+  @schemes ["bearer", "basic", "token", "digest", "negotiate"]
 
   @doc false
   @spec new_call(TypeSafe.Client.t(), atom(), String.t()) :: map()
@@ -390,17 +399,29 @@ defmodule TypeSafe.Telemetry do
   defp mask(_kind, _value), do: "***"
 
   # JS logging.ts:53-58, with one deviation (ADR 0013 decision 15): the first
-  # whitespace-separated word is a scheme only when it is letters alone. Any other
-  # value, such as a dashed key followed by a space, is masked whole, so no part of
-  # it is echoed as a "scheme". The secret keeps its last four characters only when
-  # it is longer than eight.
+  # whitespace-separated word is a scheme only when it is one of @schemes, compared
+  # without regard to case. A value with whitespace and any other first word is
+  # masked whole as "***", with no tail, so no part of it is echoed. The secret
+  # keeps its last four graphemes only when it is longer than eight.
   defp redact_key(value) do
-    with true <- String.contains?(value, " "),
-         [scheme, secret | _rest] <- String.split(value, ~r/\s+/),
-         true <- Regex.match?(~r/^[A-Za-z]+$/, scheme) do
-      scheme <> " ***" <> tail(secret)
-    else
-      _no_scheme -> "***" <> tail(value)
+    case String.split(value, separator(value)) do
+      [scheme, secret | _rest] ->
+        case String.downcase(scheme) in @schemes do
+          true -> scheme <> " ***" <> tail(secret)
+          false -> "***"
+        end
+
+      [_no_whitespace] ->
+        "***" <> tail(value)
+    end
+  end
+
+  # Unicode whitespace plus U+FEFF on valid UTF-8; the `u` flag raises on invalid
+  # UTF-8, so those values fall back to ASCII whitespace (ADR 0013 decision 15).
+  defp separator(value) do
+    case String.valid?(value) do
+      true -> ~r/[\s\x{FEFF}]+/u
+      false -> ~r/\s+/
     end
   end
 
