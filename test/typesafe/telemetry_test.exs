@@ -632,39 +632,39 @@ defmodule TypeSafe.TelemetryTest do
       assert redact(%{"authorization" => ["Bearer   #{@secret}"]}) ==
                %{"authorization" => ["Bearer ***cdef"]}
 
-      # "Scheme" is not an allowlisted scheme, so the 22-character value is masked whole.
+      # "Scheme" is not an allowlisted scheme, so the whole value is masked, with no tail.
       assert redact(%{"authorization" => ["Scheme abcd efghijklmn"]}) ==
-               %{"authorization" => ["***klmn"]}
+               %{"authorization" => ["***"]}
 
       assert redact(%{"authorization" => ["Bearer "]}) == %{"authorization" => ["Bearer ***"]}
     end
 
     # The first word is a scheme only when it is one of bearer, basic, token, digest
-    # or negotiate (case-insensitive); otherwise the whole value is the secret, masked
-    # as "***" plus the last four characters when the whole value is longer than eight.
+    # or negotiate (case-insensitive). Any other value that contains whitespace is
+    # masked as exactly "***": a tail of the whole value would expose short secrets.
     test "a dashed first word is not a scheme: x-api-key is masked whole" do
       assert redact(%{"x-api-key" => ["sk-live-SUPERSECRETVALUE9 x"]}) ==
-               %{"x-api-key" => ["***E9 x"]}
+               %{"x-api-key" => ["***"]}
     end
 
     test "a digit-free dashed first word is not a scheme either: the dash alone rejects it" do
       assert redact(%{"x-api-key" => ["sk-live-SUPERSECRETVALUE x"]}) ==
-               %{"x-api-key" => ["***UE x"]}
+               %{"x-api-key" => ["***"]}
     end
 
     test "a leading space leaves an empty first word, which is not a scheme" do
       assert redact(%{"authorization" => [" leading123456789"]}) ==
-               %{"authorization" => ["***6789"]}
+               %{"authorization" => ["***"]}
     end
 
     test "a first word with a digit is not a scheme: a trailing space does not hide it" do
       assert redact(%{"proxy-authorization" => ["SECRETPROXYTOKEN1 "]}) ==
-               %{"proxy-authorization" => ["***EN1 "]}
+               %{"proxy-authorization" => ["***"]}
     end
 
     test "a first word with digits and dashes is not a scheme: masked whole" do
       assert redact(%{"authorization" => ["tok3n-with-digits secret"]}) ==
-               %{"authorization" => ["***cret"]}
+               %{"authorization" => ["***"]}
     end
 
     test "a known scheme is kept" do
@@ -694,29 +694,45 @@ defmodule TypeSafe.TelemetryTest do
     # Red on 9b9a5d4: a letters-only first word outside the allowlist was echoed.
     test "a letters-only first word outside the allowlist is masked whole" do
       assert redact(%{"x-api-key" => ["LETTERSONLYSECRETKEY x"]}) ==
-               %{"x-api-key" => ["***EY x"]}
+               %{"x-api-key" => ["***"]}
 
       assert redact(%{"proxy-authorization" => ["PROXYLETTERSONLY "]}) ==
-               %{"proxy-authorization" => ["***NLY "]}
+               %{"proxy-authorization" => ["***"]}
     end
 
     # Red on 9b9a5d4: the old code only looked for a space, so a tab or newline hid the
-    # secret word behind a "scheme".
-    test "a tab or newline in the value does not make a letters-only word a scheme" do
+    # secret word behind a "scheme". Under the allowlist it is the letters-only case
+    # again, here with other whitespace.
+    test "a letters-only word followed by a tab or newline is masked whole" do
       assert redact(%{"authorization" => ["TABLETTERSECRET\tsk x"]}) ==
-               %{"authorization" => ["***sk x"]}
+               %{"authorization" => ["***"]}
 
       assert redact(%{"authorization" => ["LETTERSNLSECRET\nx y"]}) ==
-               %{"authorization" => ["***\nx y"]}
+               %{"authorization" => ["***"]}
+    end
+
+    # Red on 9b9a5d4: a tab or newline alone separates the scheme, so the scheme is kept.
+    test "an allowed scheme separated only by a tab or newline is kept" do
+      assert redact(%{"authorization" => ["Bearer\tabcdefghijkl"]}) ==
+               %{"authorization" => ["Bearer ***ijkl"]}
+
+      assert redact(%{"authorization" => ["Basic\nabcdefghijkl"]}) ==
+               %{"authorization" => ["Basic ***ijkl"]}
+    end
+
+    # Red on 9b9a5d4: a short secret after a non-scheme word got a tail or an echoed word.
+    test "a non-scheme first word masks a short value with no tail" do
+      assert redact(%{"authorization" => ["Custom abcd"]}) == %{"authorization" => ["***"]}
+      assert redact(%{"authorization" => [" Bearer abc"]}) == %{"authorization" => ["***"]}
     end
 
     # Red on 9b9a5d4: a near-miss of an allowlisted word is not a scheme.
     test "a near-miss scheme word is masked whole" do
       assert redact(%{"authorization" => ["Bearerx abcdefghijkl"]}) ==
-               %{"authorization" => ["***ijkl"]}
+               %{"authorization" => ["***"]}
 
       assert redact(%{"authorization" => ["Tokens abcdefghijkl"]}) ==
-               %{"authorization" => ["***ijkl"]}
+               %{"authorization" => ["***"]}
     end
 
     test "every value of a multi-value header is redacted" do
