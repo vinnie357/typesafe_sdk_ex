@@ -141,19 +141,32 @@ wins for that call and leaves the client unchanged:
 {:ok, models} = TypeSafe.list_models(client, timeout: 5_000)
 ```
 
-`timeout:` must be a positive integer. A float, `0`, a negative number, or `nil`
-returns `{:error, %TypeSafe.Error{}}` (`timeout must be a positive integer, got
-nil`) before any request is sent, and there is no environment-variable fallback.
-When a request times out, the error is a `TypeSafe.Error.Timeout` whose
-`timeout_ms` is the value that call used.
+`timeout:` must be a positive integer of at most 4_294_967_295 (about 49.7
+days). A float, `0`, a negative number, or `nil` returns `{:error,
+%TypeSafe.Error{}}` (`timeout must be a positive integer, got nil`), and a larger
+integer returns `timeout must be at most 4294967295 ms, got <n>`, both before any
+request is sent. There is no environment-variable fallback.
 
 The timeout applies to each attempt, not to the call as a whole: a retry gets a
 fresh timeout, so a call with retries can take longer in total. It is passed to
 Req as `receive_timeout`, which limits the wait for each read from the socket,
-so a response that trickles in slowly can run past it. A timeout is not retried
-unless you set `retry: [api_timeout_error: true]`, and that also covers a timeout
-while connecting, because Req reports both the same way. `pool_timeout` and
-`connect_options` pass through `req_options`; `receive_timeout` there is rejected.
+so a response that trickles in slowly can run past it.
+
+**`timeout:` does not bound connecting.** Opening the connection uses Finch's
+default of 5_000 ms. Change it with `req_options: [connect_options: [timeout:
+ms]]`. When a request times out, whether while reading or while connecting, the
+error is a `TypeSafe.Error.Timeout` whose `timeout_ms` is the configured
+per-read `timeout:` for that call, not the time that elapsed, so a connect
+timeout reports it too. A timeout is not retried unless you set
+`retry: [api_timeout_error: true]`, and that also covers a connect timeout,
+because Req reports both the same way.
+
+`req_options` cannot set `receive_timeout` or `request_timeout`, at the top level
+or under `finch:`; `new/1` returns an error naming the option. To bound waiting
+for a free connection in the pool, use `req_options: [finch: [pool_timeout:
+ms]]`. A top-level `pool_timeout` also works, but Req deprecates it and prints a
+warning on every `new/1`. `finch:` and `connect_options:` cannot be combined, and
+`new/1` rejects the pair.
 
 ### Known limitations
 
