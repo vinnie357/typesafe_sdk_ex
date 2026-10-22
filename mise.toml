@@ -1,6 +1,6 @@
 [tools]
-erlang = "28.4.2"
-elixir = "1.19.5-otp-28"
+erlang = "28.5.0.8"
+elixir = "1.19.6-otp-28"
 gitleaks = "8.30.1"
 "github:nushell/nushell" = "0.116.1"
 
@@ -62,13 +62,21 @@ run = "nu test/test-audit-wiring.nu"
 description = "Test scripts/advisory-doc.nu"
 run = "nu test/test-advisory-doc.nu"
 
+[tasks."audit:otp"]
+description = "Fail when the erlang pinned in mise.toml or the running OTP is below the CVE floor in scripts/otp-audit.nu, or when they differ. No network."
+run = "nu scripts/otp-audit.nu"
+
+[tasks."test:otp-audit"]
+description = "Test scripts/otp-audit.nu with fixture mise.toml files and a fake erl"
+run = "nu test/test-otp-audit.nu"
+
 [tasks."test:audit"]
 description = "Run every nu test for the audit scripts"
-depends = ["test:hex-audit", "test:hex-audit-offline", "test:deps-audit", "test:audit-wiring", "test:advisory-doc"]
+depends = ["test:hex-audit", "test:hex-audit-offline", "test:deps-audit", "test:audit-wiring", "test:advisory-doc", "test:otp-audit"]
 
 # `mix ci` stays in run, not depends: `mix deps.audit` compiles deps in _build/dev,
 # and every depends task finishes before run starts, so the two never race.
 [tasks.ci]
 description = "Full local CI gate"
-depends = ["deps", "audit:hex", "audit:deps", "audit:advisory-doc", "test:audit"]
+depends = ["deps", "audit:hex", "audit:deps", "audit:advisory-doc", "audit:otp", "test:audit"]
 run = ["mix ci", "mise run gitleaks"]

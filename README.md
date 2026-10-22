@@ -343,7 +343,7 @@ different project. Install it as a git dependency, pinned to a release tag:
 ```elixir
 def deps do
   [
-    {:typesafe_sdk_ex, github: "vinnie357/typesafe_sdk_ex", tag: "v0.3.1"}
+    {:typesafe_sdk_ex, github: "vinnie357/typesafe_sdk_ex", tag: "v0.3.2"}
   ]
 end
 ```
@@ -367,9 +367,10 @@ mise run ci
 
 `mise run ci` runs the full local quality gate: a `mix.lock` check, the
 `mix hex.audit` and `mix deps.audit` advisory audits, the advisory exception
-review check, the nushell tests for those audit scripts, format check, compile
-with warnings as errors, `credo --strict`, the test suite, and a gitleaks scan.
-The audits run in `mise run ci` locally and on the pinned CI leg only, and they
-need network.
+review check, the Erlang/OTP CVE floor check (`audit:otp`), the nushell tests
+for those audit scripts, format check, compile with warnings as errors,
+`credo --strict`, the test suite, and a gitleaks scan. The audits run in
+`mise run ci` locally and on the pinned CI leg only. The Hex and deps audits
+need network; the OTP floor check does not.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution workflow.

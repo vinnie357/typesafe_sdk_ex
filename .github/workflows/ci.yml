@@ -18,12 +18,15 @@ jobs:
       matrix:
         include:
           # Pinned pair — matches mise.toml's default tool versions.
-          - elixir: "1.19.5-otp-28"
-            otp: "28.4.2"
+          - elixir: "1.19.6-otp-28"
+            otp: "28.5.0.8"
             pinned: true
-          # Older pair covering mix.exs's `elixir: "~> 1.18"` claim.
+          # Older pair covering mix.exs's `elixir: "~> 1.18"` claim. 27.3.4.19 is the
+          # latest OTP 27 patch and carries the 27-line fixes for the CVEs behind
+          # audit:otp's 28.x floor. audit:otp does not run here (OTP 27 is below that
+          # floor by design); test/test-audit-wiring.nu pins this pair instead.
           - elixir: "1.18.5-otp-27"
-            otp: "27.3.4.17"
+            otp: "27.3.4.19"
             pinned: false
     env:
       MISE_ELIXIR_VERSION: ${{ matrix.elixir }}
@@ -54,10 +57,11 @@ jobs:
             ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
 
       # The pinned leg runs the same `mise run ci` DAG as a local run: deps,
-      # the hex/deps/advisory-doc audits, the audit script tests, `mix ci`
+      # the hex/deps/advisory-doc/otp audits, the audit script tests, `mix ci`
       # and gitleaks. Audits read mix.lock and the advisory databases, not
       # OTP or Elixir, and gitleaks scans history that is identical across
       # legs, so they run once, here.
+      # audit:otp checks the pinned OTP, so it runs only on this leg.
       - name: Full CI (audits, tests, gitleaks)
         if: matrix.pinned
         run: mise run ci
