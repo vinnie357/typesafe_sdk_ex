@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-21
+
+### Security
+
+- Update `req` from 0.7.4 to 0.7.5 in `mix.lock`. The `~> 0.7.4` constraint is
+  unchanged.
+- `mise run ci` now runs `mix hex.audit` (on Hex 2.5.3 or newer) and
+  `mix deps.audit` (`mix_audit`, a dev and test dependency only). The audits run
+  in `mise run ci` locally and on the pinned CI leg only.
+- A stale allow-list entry in `mix.exs` or `.mix-audit-ignore`, and an overdue
+  exception review, fail CI.
+- Add `docs/security/advisory-exceptions.md` for the STRIDE review of any
+  allow-listed advisory. It holds no exceptions.
+- Pin every CI action to a commit SHA.
+
+No library code changed.
+
 ## [0.3.0] - 2026-09-30
 
 ### Added

@@ -2,6 +2,7 @@
 erlang = "28.4.2"
 elixir = "1.19.5-otp-28"
 gitleaks = "8.30.1"
+"github:nushell/nushell" = "0.116.1"
 
 [tasks.deps]
 description = "Fetch mix dependencies, failing if mix.lock would change"
@@ -27,11 +28,47 @@ run = "mix test --warnings-as-errors"
 description = "Scan repository history for secrets"
 run = "gitleaks detect --source . --no-banner"
 
-[tasks."hex-audit"]
-description = "Check for retired or security-advisory dependencies"
-run = "mix hex.audit"
+[tasks."audit:hex"]
+description = "Run mix hex.audit on Hex >= 2.5.3; fail on any advisory or retirement not allow-listed in mix.exs, or on a stale allow-list entry. Needs network."
+depends = ["deps"]
+run = "nu scripts/hex-audit.nu"
 
+[tasks."audit:deps"]
+description = "Run mix deps.audit (mix_audit) unfiltered; fail on unskipped or stale .mix-audit-ignore entries, a missing or unreadable mix.lock, an empty advisory DB, or a blind positive control. Needs network."
+depends = ["audit:hex"]
+run = "nu scripts/deps-audit.nu"
+
+[tasks."audit:advisory-doc"]
+description = "Fail when an exception in docs/security/advisory-exceptions.md has an overdue, missing or unparseable Next review date"
+run = "nu scripts/advisory-doc.nu"
+
+[tasks."test:hex-audit"]
+description = "Test scripts/hex-audit.nu"
+run = "nu test/test-hex-audit.nu"
+
+[tasks."test:hex-audit-offline"]
+description = "Test that scripts/hex-audit.nu fails closed on a registry cache fallback"
+run = "nu test/test-hex-audit-offline.nu"
+
+[tasks."test:deps-audit"]
+description = "Test scripts/deps-audit.nu"
+run = "nu test/test-deps-audit.nu"
+
+[tasks."test:audit-wiring"]
+description = "Test the audit task wiring, allow-list parity, the advisory doc and the CI workflow"
+run = "nu test/test-audit-wiring.nu"
+
+[tasks."test:advisory-doc"]
+description = "Test scripts/advisory-doc.nu"
+run = "nu test/test-advisory-doc.nu"
+
+[tasks."test:audit"]
+description = "Run every nu test for the audit scripts"
+depends = ["test:hex-audit", "test:hex-audit-offline", "test:deps-audit", "test:audit-wiring", "test:advisory-doc"]
+
+# `mix ci` stays in run, not depends: `mix deps.audit` compiles deps in _build/dev,
+# and every depends task finishes before run starts, so the two never race.
 [tasks.ci]
 description = "Full local CI gate"
-depends = ["deps"]
-run = ["mix ci", "mise run hex-audit", "mise run gitleaks"]
+depends = ["deps", "audit:hex", "audit:deps", "audit:advisory-doc", "test:audit"]
+run = ["mix ci", "mise run gitleaks"]
