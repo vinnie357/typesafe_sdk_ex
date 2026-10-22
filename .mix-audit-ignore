@@ -1,0 +1,7 @@
+# Advisory IDs skipped by `mix deps.audit` (mise run audit:deps). Holds no IDs today.
+#
+# Each ID line has this comment line directly above it:
+# <ID> <tracking issue URL> docs/security/advisory-exceptions.md#<lower-cased ID>
+# Use the GHSA ID when the advisory has one; otherwise the ID `mix hex.audit` reports.
+# Put the same ID in mix.exs `hex: [ignore_advisories: [...]]`.
+# Comments start with `#` at column 0. ID lines carry no leading or trailing whitespace.

@@ -20,17 +20,17 @@ jobs:
           # Pinned pair — matches mise.toml's default tool versions.
           - elixir: "1.19.5-otp-28"
             otp: "28.4.2"
-            run_gitleaks: true
+            pinned: true
           # Older pair covering mix.exs's `elixir: "~> 1.18"` claim.
           - elixir: "1.18.5-otp-27"
             otp: "27.3.4.17"
-            run_gitleaks: false
+            pinned: false
     env:
       MISE_ELIXIR_VERSION: ${{ matrix.elixir }}
       MISE_ERLANG_VERSION: ${{ matrix.otp }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -39,12 +39,12 @@ jobs:
       # races when legs run in parallel. Disable it; the deps/_build cache
       # below is scoped per leg and is the one that matters for CI time.
       - name: Setup mise
-        uses: jdx/mise-action@v4
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           cache: false
 
       - name: Cache deps and _build
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             deps
@@ -53,25 +53,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
 
+      # The pinned leg runs the same `mise run ci` DAG as a local run: deps,
+      # the hex/deps/advisory-doc audits, the audit script tests, `mix ci`
+      # and gitleaks. Audits read mix.lock and the advisory databases, not
+      # OTP or Elixir, and gitleaks scans history that is identical across
+      # legs, so they run once, here.
+      - name: Full CI (audits, tests, gitleaks)
+        if: matrix.pinned
+        run: mise run ci
+
       # `mise run <task>` resolves tool versions straight from mise.toml's
       # [tools] table and ignores MISE_ELIXIR_VERSION/MISE_ERLANG_VERSION —
       # confirmed by a CI run where `mise run deps` tried to install the
       # OTHER leg's pinned pair mid-job despite the override being active
       # (and correctly honored moments earlier by `mise install` in the
-      # Setup mise step). `mise exec --` does respect the override, so every
-      # step below calls the underlying command through it instead of
-      # through a mise task.
+      # Setup mise step). `mise exec --` does respect the override, so the
+      # compat leg calls the underlying commands through it. The pinned leg
+      # can use `mise run` because its pair equals mise.toml.
       - name: Fetch deps
+        if: ${{ !matrix.pinned }}
         run: mise exec -- mix deps.get --check-locked
 
       - name: Format, compile, lint, test
+        if: ${{ !matrix.pinned }}
         run: mise exec -- mix ci
-
-      - name: Hex audit
-        run: mise exec -- mix hex.audit
-
-      # Gitleaks scans repository history, which is identical across legs —
-      # run it once, on the pinned leg, rather than duplicating the scan.
-      - name: Gitleaks
-        if: matrix.run_gitleaks
-        run: mise exec -- gitleaks detect --source . --no-banner

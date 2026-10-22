@@ -1,11 +1,11 @@
 # ADR 0002: Runtime dependency is Req only
 
 **Status:** Accepted
-**Date:** 2026-09-17; amended 2026-09-29 (`:inets`, Mint and Finch); amended 2026-09-30 (README consumer note); amended 2026-09-30 (`:telemetry`, issue #13)
+**Date:** 2026-09-17; amended 2026-09-29 (`:inets`, Mint and Finch); amended 2026-09-30 (README consumer note); amended 2026-09-30 (`:telemetry`, issue #13); amended 2026-10-21 (`mix_audit`, issue #29)
 
 ## Context
 
-The operator set the dependency constraint at the start of the port (2026-09-17): the only runtime dependency is `req`. Req brings Finch, Mint, and Jason transitively. `credo` is a CI-only tool. The constraint excludes `plug`, `ex_doc`, Mox, NimbleOptions, and any direct Jason call.
+The operator set the dependency constraint at the start of the port (2026-09-17): the only runtime dependency is `req`. Req brings Finch, Mint, and Jason transitively. `credo` and `mix_audit` are CI-only tools. The constraint excludes `plug`, `ex_doc`, Mox, NimbleOptions, and any direct Jason call.
 
 On 2026-09-30 the operator made `:telemetry` a second runtime dependency, declared directly (issue #13, decision comment). Req's own dependency tree already contains it, locked at 1.4.2, so the lock file is unchanged. The title keeps its original name.
 
@@ -13,7 +13,7 @@ Several JS features tempt a dependency (see the table under Decision). Each has 
 
 ## Decision
 
-1. `req` and `telemetry` are the runtime dependencies. `mix.exs` lists `{:telemetry, "~> 1.0"}`, and `credo` with `only: [:dev, :test], runtime: false`.
+1. `req` and `telemetry` are the runtime dependencies. `mix.exs` lists `{:telemetry, "~> 1.0"}`, and `credo` and `mix_audit` with `only: [:dev, :test], runtime: false`. `mix_audit` brings `yaml_elixir` and `yamerl`, also dev and test only, so the runtime surface stays Req and telemetry.
 2. `lib/` and `test/` call no Jason, NimbleOptions, Mox, `Req.Test`, plug, or Timex function.
 3. The SDK uses the substitutes in the table below.
 4. `:inets` is listed in `extra_applications`, so a release bundles `:httpd_util`.

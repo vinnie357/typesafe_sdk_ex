@@ -1,7 +1,7 @@
 defmodule TypeSafe.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.3.1"
   @source_url "https://github.com/vinnie357/typesafe_sdk_ex"
 
   def project do
@@ -16,7 +16,9 @@ defmodule TypeSafe.MixProject do
       description: description(),
       package: package(),
       source_url: @source_url,
-      aliases: aliases()
+      aliases: aliases(),
+      # Same IDs as .mix-audit-ignore; STRIDE in docs/security/advisory-exceptions.md; drop when fixed.
+      hex: [ignore_advisories: []]
     ]
   end
 
@@ -42,7 +44,8 @@ defmodule TypeSafe.MixProject do
     [
       {:req, "~> 0.7.4"},
       {:telemetry, "~> 1.0"},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
     ]
   end
 

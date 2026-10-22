@@ -6,8 +6,8 @@
 mise install
 ```
 
-`mise install` fetches the pinned Erlang, Elixir, and gitleaks versions
-from `mise.toml`.
+`mise install` fetches the pinned Erlang, Elixir, gitleaks, and nushell
+versions from `mise.toml`. The audit scripts and their tests are nushell.
 
 ## Before every commit
 
@@ -15,8 +15,13 @@ from `mise.toml`.
 mise run ci
 ```
 
-`mise run ci` must pass — format check, `mix compile --warnings-as-errors`,
-`credo --strict`, `mix test --warnings-as-errors`, and a gitleaks scan. Fix
+`mise run ci` must pass — the `mix hex.audit` and `mix deps.audit` advisory
+audits, the advisory exception review check, the audit script tests, format
+check, `mix compile --warnings-as-errors`, `credo --strict`,
+`mix test --warnings-as-errors`, and a gitleaks scan. The audits need network.
+They run in `mise run ci` locally and on the pinned CI leg only. See
+[`docs/security/advisory-exceptions.md`](docs/security/advisory-exceptions.md)
+before you allow-list an advisory. Fix
 any failure locally before committing; do not push past a red gate.
 
 ## Running a single test file
