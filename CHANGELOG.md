@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-22
+
+### Security
+
+- Pin Erlang/OTP 28.5.0.8 and Elixir 1.19.6-otp-28 in `mise.toml` and the
+  pinned CI leg (was 28.4.2 / 1.19.5-otp-28). OTP 28.5.0.8 carries the fixes for
+  the OTP CVEs published since 28.4.2, including CVE-2026-55953,
+  CVE-2026-89422, CVE-2026-105236 and CVE-2026-94200, and follow-up fixes for
+  CVE-2026-42789 and CVE-2026-48856.
+- Move the compatibility CI leg to OTP 27.3.4.19 (was 27.3.4.17), the latest
+  OTP 27 patch, which carries the same fixes on the 27 line.
+- `mise run ci` now runs `audit:otp`. It fails when the pinned or running OTP is
+  below the 28.5.0.8 floor in `scripts/otp-audit.nu`, or when the two differ.
+  It runs locally and on the pinned CI leg only.
+- Dependabot now opens weekly update PRs for Hex dependencies (`mix`) as well as
+  GitHub Actions.
+
+No library code changed. The `elixir: "~> 1.18"` requirement is unchanged.
+
 ## [0.3.1] - 2026-10-21
 
 ### Security

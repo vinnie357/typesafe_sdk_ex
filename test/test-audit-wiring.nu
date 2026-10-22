@@ -1,5 +1,5 @@
 #!/usr/bin/env nu
-# test-audit-wiring.nu — T2-T6: audit gate wiring, allow-list parity, the STRIDE doc and the CI workflow.
+# test-audit-wiring.nu — T2-T7: audit gate wiring, allow-list parity, the STRIDE doc, the CI workflow and dependabot.
 #
 # Reads files only; evaluates nothing. Each section runs even when an earlier
 # one fails, so one run reports every red section. Exits 1 on any failure.
@@ -9,18 +9,20 @@
 #     `depends = ["audit:hex"]`.
 #   - [tasks."audit:hex"] runs `nu scripts/hex-audit.nu` and has
 #     `depends = ["deps"]`.
-#   - tasks.ci.depends contains deps, audit:hex, audit:deps, audit:advisory-doc
-#     and test:audit (membership only: mise runs depends in parallel, so order
+#   - tasks.ci.depends contains deps, audit:hex, audit:deps, audit:advisory-doc,
+#     audit:otp and test:audit (membership only: mise runs depends in parallel, so order
 #     means nothing). It does not contain compile, test or credo: `mix ci` in
 #     tasks.ci.run sequences them after every depends task, so deps.audit never
 #     races a compile on _build.
 #   - tasks.ci.run runs `mix ci` and never names the removed hex-audit task.
-#   - [tasks."test:audit"] depends on exactly the five test tasks
+#   - [tasks."test:audit"] depends on exactly the six test tasks
 #     test:hex-audit, test:hex-audit-offline, test:deps-audit,
-#     test:audit-wiring and test:advisory-doc. Each test task and
-#     audit:advisory-doc runs its file.
+#     test:audit-wiring, test:advisory-doc and test:otp-audit. Each test task,
+#     audit:advisory-doc and audit:otp runs its file.
 #   - No [tasks."hex-audit"] remains; audit:hex supersedes it.
 #   - mise.toml [tools] pins "github:nushell/nushell" to an exact X.Y.Z.
+#   - mise.toml [tools] pins erlang = "28.5.0.8" and elixir = "1.19.6-otp-28"
+#     (exact strings), and the elixir `-otp-N` suffix equals the erlang major.
 #   - mix.exs declares :mix_audit with `only: [:dev, :test]` and `runtime: false`.
 #   - .mix-audit-ignore exists at the repo root; .mix-audit-skips does not
 #     (guards the earlier name, so every repo uses one file name).
@@ -58,14 +60,22 @@
 #   - exactly one matrix leg has `pinned: true`, every leg sets `pinned` to a
 #     boolean, and the pinned leg's elixir and otp equal mise.toml [tools]
 #     elixir and erlang (so `mise run` on that leg resolves the same pair);
+#   - exactly one leg has `pinned: false`; its pair is elixir "1.18.5-otp-27"
+#     and otp "27.3.4.19" (exact strings, the latest OTP 27 patch with the
+#     27-line CVE fixes), and its elixir `-otp-N` suffix equals its otp major;
 #   - a step with `if: matrix.pinned` runs `mise run ci`;
 #   - steps with `if: !matrix.pinned` run `mise exec -- mix deps.get
 #     --check-locked` and `mise exec -- mix ci` (`mise run` ignores
 #     MISE_*_VERSION, so the compat leg calls mix through `mise exec`);
 #   - every step that can run on the compat leg (no `if`, or any `if` other
-#     than `matrix.pinned`) runs no `nu scripts/`, `nu test/`, hex.audit,
-#     deps.audit or gitleaks;
+#     than `matrix.pinned`) runs no `nu scripts/`, `nu test/`, `mise run`,
+#     hex.audit, deps.audit or gitleaks; in particular it never runs
+#     audit:otp (OTP 27 is below the 28.x floor by design);
 #   - no step runs a bare `mix hex.audit`.
+# T7 dependabot (.github/dependabot.yml, read as YAML):
+#   - version is 2;
+#   - updates has exactly one "mix" entry and one "github-actions" entry;
+#   - each of them has directory "/" and schedule.interval "weekly".
 #
 # Doc sections: only `## ` headings outside fenced code blocks whose text
 # matches the advisory ID shape `^[A-Z][A-Z0-9]*(-[A-Za-z0-9]+)+$` start a
@@ -253,6 +263,20 @@ def doc-sections-fixture [] {
   assert (($got.0.subsections | where name == "Owner" | get 0.body) | str contains "Maintainer") "a subsection body must hold its lines"
 }
 
+# N from an elixir `X.Y.Z-otp-N` version; null when the suffix is missing.
+def otp-suffix [elixir] {
+  if ($elixir | describe) != "string" { return null }
+  let hit = ($elixir | parse --regex '-otp-(?<n>\d+)$')
+  if ($hit | is-empty) { null } else { $hit.0.n | into int }
+}
+
+# Major of an OTP version string such as 28.5.0.8; null when not numeric.
+def otp-major [otp] {
+  if ($otp | describe) != "string" { return null }
+  let hit = ($otp | parse --regex '^(?<n>\d+)(\.\d+)*$')
+  if ($hit | is-empty) { null } else { $hit.0.n | into int }
+}
+
 def t2-wiring [] {
   let tasks = (open ($root | path join "mise.toml") | get tasks)
   let deps_task = ($tasks | get -o "audit:deps")
@@ -269,7 +293,7 @@ def t2-wiring [] {
   assert (($tasks | get -o "hex-audit") == null) "mise.toml must not define [tasks.\"hex-audit\"]; audit:hex supersedes it"
 
   let ci = ($tasks.ci | get -o depends | default [])
-  for t in ["deps" "audit:hex" "audit:deps" "audit:advisory-doc" "test:audit"] {
+  for t in ["deps" "audit:hex" "audit:deps" "audit:advisory-doc" "audit:otp" "test:audit"] {
     assert ($t in $ci) $"tasks.ci.depends must include ($t); got: ($ci)"
   }
   # deps.audit compiles deps; a parallel compile would race it on _build. So
@@ -281,18 +305,23 @@ def t2-wiring [] {
   assert ("mix ci" in $ci_run) $"tasks.ci.run must include `mix ci`; got: ($ci_run)"
   assert (not ($ci_run | any {|c| $c | str contains "hex-audit" })) $"tasks.ci.run must not run the removed hex-audit task; got: ($ci_run)"
 
-  let test_tasks = ["test:hex-audit" "test:hex-audit-offline" "test:deps-audit" "test:audit-wiring" "test:advisory-doc"]
+  let test_tasks = ["test:hex-audit" "test:hex-audit-offline" "test:deps-audit" "test:audit-wiring" "test:advisory-doc" "test:otp-audit"]
   let test_audit = ($tasks | get -o "test:audit")
   assert ($test_audit != null) "mise.toml must define [tasks.\"test:audit\"]"
-  assert equal ($test_audit | get -o depends | default [] | sort) ($test_tasks | sort) "test:audit must depend on exactly the five audit test tasks"
+  assert equal ($test_audit | get -o depends | default [] | sort) ($test_tasks | sort) "test:audit must depend on exactly the six audit test tasks"
 
-  for pair in [["test:hex-audit" "nu test/test-hex-audit.nu"] ["test:deps-audit" "nu test/test-deps-audit.nu"] ["test:hex-audit-offline" "nu test/test-hex-audit-offline.nu"] ["test:audit-wiring" "nu test/test-audit-wiring.nu"] ["test:advisory-doc" "nu test/test-advisory-doc.nu"] ["audit:advisory-doc" "nu scripts/advisory-doc.nu"]] {
+  for pair in [["test:hex-audit" "nu test/test-hex-audit.nu"] ["test:deps-audit" "nu test/test-deps-audit.nu"] ["test:hex-audit-offline" "nu test/test-hex-audit-offline.nu"] ["test:audit-wiring" "nu test/test-audit-wiring.nu"] ["test:advisory-doc" "nu test/test-advisory-doc.nu"] ["audit:advisory-doc" "nu scripts/advisory-doc.nu"] ["audit:otp" "nu scripts/otp-audit.nu"] ["test:otp-audit" "nu test/test-otp-audit.nu"]] {
     assert equal ($tasks | get -o $pair.0 | get -o run) $pair.1 $"($pair.0) must run `($pair.1)`"
   }
 
   let nu_pin = (open ($root | path join "mise.toml") | get -o tools | default {} | get -o "github:nushell/nushell")
   assert ($nu_pin != null) "mise.toml [tools] must pin \"github:nushell/nushell\""
   assert (($nu_pin | describe) == "string" and ($nu_pin =~ '^\d+\.\d+\.\d+$')) $"mise.toml must pin nushell to an exact X.Y.Z version; got: ($nu_pin)"
+
+  let tools = (open ($root | path join "mise.toml") | get -o tools | default {})
+  assert equal ($tools | get -o erlang) "28.5.0.8" "mise.toml [tools] must pin erlang = \"28.5.0.8\" (the OTP CVE floor)"
+  assert equal ($tools | get -o elixir) "1.19.6-otp-28" "mise.toml [tools] must pin elixir = \"1.19.6-otp-28\""
+  assert equal (otp-suffix ($tools | get -o elixir)) (otp-major ($tools | get -o erlang)) $"the mise.toml elixir pin's -otp-N suffix must equal the erlang pin's major; got elixir ($tools | get -o elixir), erlang ($tools | get -o erlang)"
 
   let mix_audit = (read "mix.exs" | lines | where {|l| $l =~ '\{:mix_audit,' })
   assert equal ($mix_audit | length) 1 "mix.exs must declare :mix_audit once"
@@ -420,6 +449,12 @@ def t6-ci [] {
   assert equal ($pinned.0 | get -o elixir) $tools.elixir "the pinned leg's elixir must equal mise.toml [tools] elixir"
   assert equal ($pinned.0 | get -o otp) $tools.erlang "the pinned leg's otp must equal mise.toml [tools] erlang"
 
+  let compat = ($legs | where {|leg| ($leg | get -o pinned) == false })
+  assert equal ($compat | length) 1 $"exactly one matrix leg must have pinned: false; got: ($legs | to nuon)"
+  assert equal ($compat.0 | get -o elixir) "1.18.5-otp-27" "the compat leg's elixir must be \"1.18.5-otp-27\""
+  assert equal ($compat.0 | get -o otp) "27.3.4.19" "the compat leg's otp must be \"27.3.4.19\", the latest OTP 27 patch with the 27-line CVE fixes"
+  assert equal (otp-suffix ($compat.0 | get -o elixir)) (otp-major ($compat.0 | get -o otp)) $"the compat leg's elixir -otp-N suffix must equal its otp major; got: ($compat.0 | to nuon)"
+
   let steps = ($ci_job | get -o steps | default [])
   let on_pinned = ($steps | where {|s| (step-if $s) == "matrix.pinned" })
   let only_compat = ($steps | where {|s| (step-if $s) == "!matrix.pinned" })
@@ -432,13 +467,30 @@ def t6-ci [] {
 
   for s in $maybe_compat {
     let run = (step-run $s)
-    for banned in ["nu scripts/" "nu test/" "hex.audit" "deps.audit" "gitleaks"] {
+    for banned in ["nu scripts/otp-audit.nu" "mise run ci"] {
+      assert (not ($run | str contains $banned)) $"step `($s | get -o name | default '?')` can run on the compat leg; a compat-capable step must not run `nu scripts/otp-audit.nu` or `mise run ci` \(OTP 27 is below the 28.x floor by design\); its if: '($s | get -o if | default '')'"
+    }
+    for banned in ["nu scripts/" "nu test/" "mise run" "hex.audit" "deps.audit" "gitleaks"] {
       assert (not ($run | str contains $banned)) $"step `($s | get -o name | default '?')` can run on the compat leg and must not run `($banned)`; its if: '($s | get -o if | default '')'"
     }
   }
 
   for s in $steps {
     assert (not (step-run $s | str contains "mix hex.audit")) $"step `($s | get -o name | default '?')` must not run a bare `mix hex.audit`; audit:hex runs it through scripts/hex-audit.nu"
+  }
+}
+
+const dependabot_path = ".github/dependabot.yml"
+
+def t7-dependabot [] {
+  let cfg = (read $dependabot_path | from yaml)
+  assert equal ($cfg | get -o version) 2 $"($dependabot_path) must set version: 2"
+  let updates = ($cfg | get -o updates | default [])
+  for eco in ["mix" "github-actions"] {
+    let hits = ($updates | where {|u| ($u | get -o "package-ecosystem") == $eco })
+    assert equal ($hits | length) 1 $"($dependabot_path) updates must have exactly one \"($eco)\" entry; got: ($updates | to nuon)"
+    assert equal ($hits.0 | get -o directory) "/" $"the ($eco) entry must set directory: \"/\""
+    assert equal ($hits.0 | get -o schedule.interval) "weekly" $"the ($eco) entry must set schedule.interval: \"weekly\""
   }
 }
 
@@ -450,6 +502,7 @@ def main [] {
     {name: "T5 no orphans", run: {|| t5-orphans }}
     {name: "T5 fixture: doc-sections", run: {|| doc-sections-fixture }}
     {name: "T6 CI workflow", run: {|| t6-ci }}
+    {name: "T7 dependabot", run: {|| t7-dependabot }}
   ] | each {|t|
     try {
       do $t.run

@@ -1,7 +1,7 @@
 # ADR 0002: Runtime dependency is Req only
 
 **Status:** Accepted
-**Date:** 2026-09-17; amended 2026-09-29 (`:inets`, Mint and Finch); amended 2026-09-30 (README consumer note); amended 2026-09-30 (`:telemetry`, issue #13); amended 2026-10-21 (`mix_audit`, issue #29)
+**Date:** 2026-09-17; amended 2026-09-29 (`:inets`, Mint and Finch); amended 2026-09-30 (README consumer note); amended 2026-09-30 (`:telemetry`, issue #13); amended 2026-10-21 (`mix_audit`, issue #29); amended 2026-10-22 (CI pins, issue #29)
 
 ## Context
 
@@ -24,7 +24,7 @@ Several JS features tempt a dependency (see the table under Decision). Each has 
 | Concern | Mechanism |
 |---|---|
 | Request JSON encoding | Req's `:json` option (Req calls Jason itself; the SDK does not). |
-| Response JSON decoding | `decode_body: false` plus stdlib `JSON.decode/1`, which needs Elixir 1.18 or later (`mix.exs`: `elixir: "~> 1.18"`; the CI matrix runs 1.18.5 and 1.19.5). ADR 0005 gives the reason. |
+| Response JSON decoding | `decode_body: false` plus stdlib `JSON.decode/1`, which needs Elixir 1.18 or later (`mix.exs`: `elixir: "~> 1.18"`; the CI matrix runs 1.18.5 and 1.19.6). ADR 0005 gives the reason. |
 | Option key validation | `Keyword.validate/2`. Value checks are guard clauses written for the purpose. |
 | Env variables | `System.get_env/1`, injected as the `:get_env` function (ADR 0004). |
 | Retry-After HTTP date | `:httpd_util.convert_request_date/1` plus `NaiveDateTime`. Req's own parser lives in `Req.Utils`, which is `@moduledoc false` (`req@0.7.4 lib/req/utils.ex:2`). |

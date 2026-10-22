@@ -16,10 +16,15 @@ mise run ci
 ```
 
 `mise run ci` must pass — the `mix hex.audit` and `mix deps.audit` advisory
-audits, the advisory exception review check, the audit script tests, format
-check, `mix compile --warnings-as-errors`, `credo --strict`,
-`mix test --warnings-as-errors`, and a gitleaks scan. The audits need network.
-They run in `mise run ci` locally and on the pinned CI leg only. See
+audits, the advisory exception review check, the Erlang/OTP CVE floor check
+(`audit:otp`), the audit script tests, format check,
+`mix compile --warnings-as-errors`, `credo --strict`,
+`mix test --warnings-as-errors`, and a gitleaks scan. The Hex and deps audits
+need network. The audits run in `mise run ci` locally and on the pinned CI leg
+only. `audit:otp` fails when the erlang pin in `mise.toml` or the running `erl`
+is below the floor in `scripts/otp-audit.nu`, or when the two differ. A
+`mise.local.toml` or `.tool-versions` override of erlang therefore fails
+`mise run ci`. See
 [`docs/security/advisory-exceptions.md`](docs/security/advisory-exceptions.md)
 before you allow-list an advisory. Fix
 any failure locally before committing; do not push past a red gate.
