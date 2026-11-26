@@ -42,7 +42,7 @@ jobs:
       # races when legs run in parallel. Disable it; the deps/_build cache
       # below is scoped per leg and is the one that matters for CI time.
       - name: Setup mise
-        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           cache: false
 
